@@ -28,6 +28,16 @@ whatever they typed (12 chars). Rules only allow a player to write their own doc
 **Caveat:** scores are submitted by the client, so a determined player can post a fake time within the allowed range.
 The rules bound the values but cannot verify a run; real anti-cheat needs server-side replay validation.
 
+## Moving players off the game hub's iframe
+
+Browsers give a game inside another site's iframe its own separate storage, so saves made in the hub's embedded copy
+aren't visible when the game is opened directly. When the game detects it is embedded it shows a launcher instead:
+**Move my save & play** opens the game in its own tab and hands the save over with `postMessage` (same origin, no server).
+The new tab merges it with anything already there: best times, faster ghosts, all owned cars, higher upgrade levels,
+and coins from both (each source save's coins are only counted once). If the browser blocks the new tab, the launcher
+shows a link carrying the save (without ghosts) in the URL `#fragment` instead. See `src/game/saveTransfer.ts` and
+`src/game/saveMerge.ts`; `npm run test:merge` tests the merge rules.
+
 ## Cars, tracks and balance
 
 - **Car classes** (All-Rounder, Speedster, Grip Racer, Drifter, Off-Roader, Booster, Agile, Hypercar) are defined by rules on
