@@ -1,0 +1,90 @@
+import Phaser from 'phaser';
+import { GAME_HEIGHT, GAME_WIDTH, SceneKey } from '../game/config';
+import { TRACKS } from '../game/tracks';
+import { firebaseConfigured } from '../net/firebase';
+import { BOARD_ENDLESS, BOARD_OVERSTEER, fetchTop, formatScore } from '../net/leaderboard';
+
+const BOARDS = [...TRACKS.map((t) => ({ id: t.id, name: t.name })), { id: BOARD_ENDLESS, name: 'Endless' }, { id: BOARD_OVERSTEER, name: 'OVERSTEER' }];
+
+export class LeaderboardScene extends Phaser.Scene {
+  private idx = 0;
+  private token = 0;
+  private title!: Phaser.GameObjects.Text;
+  private rows: Phaser.GameObjects.Text[] = [];
+  private status!: Phaser.GameObjects.Text;
+
+  constructor() {
+    super(SceneKey.Leaderboard);
+  }
+
+  init(data: { board?: string }): void {
+    this.idx = Math.max(0, BOARDS.findIndex((b) => b.id === data.board));
+  }
+
+  create(): void {
+    const mono = { fontFamily: 'monospace', fontSize: '8px', color: '#ffffff' };
+    this.add.text(GAME_WIDTH / 2, 12, 'GLOBAL LEADERBOARD', { ...mono, fontSize: '12px', color: '#ffd166' }).setOrigin(0.5);
+
+    this.title = this.add.text(GAME_WIDTH / 2, 30, '', { ...mono, fontSize: '10px' }).setOrigin(0.5);
+    const arrow = (x: number, label: string, d: number) =>
+      this.add.text(x, 30, label, { ...mono, fontSize: '10px', color: '#ffd166' }).setOrigin(0.5)
+        .setInteractive({ useHandCursor: true }).on('pointerdown', () => this.step(d));
+    arrow(24, '<', -1);
+    arrow(GAME_WIDTH - 24, '>', 1);
+
+    this.rows = Array.from({ length: 10 }, (_, i) => this.add.text(GAME_WIDTH / 2, 46 + i * 11.5, '', mono).setOrigin(0.5, 0));
+    this.status = this.add.text(GAME_WIDTH / 2, 92, '', { ...mono, color: '#c9d1e3', align: 'center' }).setOrigin(0.5);
+
+    this.add.text(GAME_WIDTH / 2, GAME_HEIGHT - 8, 'LEFT/RIGHT board   ESC back', { ...mono, color: '#8d99ae' }).setOrigin(0.5);
+    this.add.text(4, GAME_HEIGHT - 8, '< BACK', { ...mono, color: '#ffd166' }).setOrigin(0, 0.5)
+      .setInteractive({ useHandCursor: true }).on('pointerdown', () => this.back());
+
+    const kb = this.input.keyboard!;
+    kb.on('keydown-LEFT', () => this.step(-1));
+    kb.on('keydown-RIGHT', () => this.step(1));
+    kb.on('keydown-A', () => this.step(-1));
+    kb.on('keydown-D', () => this.step(1));
+    kb.on('keydown-ESC', () => this.back());
+    kb.on('keydown-BACKSPACE', () => this.back());
+    this.events.once('shutdown', () => kb.removeAllListeners());
+
+    this.loadBoard();
+  }
+
+  private back(): void {
+    this.scene.start(SceneKey.Menu);
+  }
+
+  private step(d: number): void {
+    this.idx = (this.idx + d + BOARDS.length) % BOARDS.length;
+    this.loadBoard();
+  }
+
+  private loadBoard(): void {
+    const board = BOARDS[this.idx];
+    this.title.setText(board.name);
+    this.rows.forEach((r) => r.setText(''));
+
+    if (!firebaseConfigured) {
+      this.status.setText('Leaderboard not set up.\nAdd your Firebase keys to .env\n(see README.md).');
+      return;
+    }
+    this.status.setText('Loading...');
+    const token = ++this.token;
+    fetchTop(board.id)
+      .then(({ rows, myUid }) => {
+        if (token !== this.token || !this.scene.isActive()) return;
+        this.status.setText(rows.length ? '' : 'No scores yet. Be the first!');
+        rows.forEach((r, i) => {
+          const line = `${String(i + 1).padStart(2)}  ${r.name.padEnd(12)} ${formatScore(board.id, r.value).padStart(10)}`;
+          this.rows[i].setText(line).setColor(r.uid === myUid ? '#ffd166' : '#ffffff');
+        });
+      })
+      .catch((e: unknown) => {
+        console.error('[leaderboard]', e);
+        if (token !== this.token || !this.scene.isActive()) return;
+        const code = (e as { code?: string }).code ?? (e as Error).message ?? 'unknown';
+        this.status.setText(`Couldn't reach the leaderboard.\n${String(code).replace('auth/', '').replace('permission-denied', 'permission denied (check rules)').slice(0, 60)}`);
+      });
+  }
+}
