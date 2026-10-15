@@ -65,3 +65,12 @@ export function submitEndless(meters: number, mode: DistanceMode = 'endless'): b
   save(s);
   return true;
 }
+
+/** Every local best as a leaderboard entry (race boards in ms, distance boards in metres). */
+export function getLocalBests(): { board: string; value: number }[] {
+  const s = load();
+  const out: { board: string; value: number }[] = [];
+  for (const [id, r] of Object.entries(s.tracks)) if (r.best !== undefined) out.push({ board: id, value: Math.round(r.best * 1000) });
+  for (const mode of ['endless', 'oversteer'] as const) if ((s[mode] ?? 0) > 0) out.push({ board: mode, value: s[mode] as number });
+  return out;
+}

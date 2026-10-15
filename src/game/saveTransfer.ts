@@ -7,7 +7,7 @@
 //
 // If the browser blocks the new tab from talking back, the launcher falls back to a link carrying the save
 // (without ghosts, to keep it short) in the URL #fragment, which never leaves the browser.
-import { IMPORTED_KEY, MIGRATED_KEY, SAVE_PREFIX, TRANSFER_ID_KEY, describeSave, hasProgress, mergeSaves, type SaveData } from './saveMerge';
+import { IMPORTED_KEY, LB_SYNCED_KEY, MIGRATED_KEY, SAVE_PREFIX, TRANSFER_ID_KEY, describeSave, hasProgress, mergeSaves, type SaveData } from './saveMerge';
 
 const MSG_READY = 'oversteer-ready';
 const MSG_SAVE = 'oversteer-save';
@@ -51,6 +51,7 @@ function exportable(): SaveData {
   delete s[MIGRATED_KEY];
   delete s[IMPORTED_KEY];
   delete s[TRANSFER_ID_KEY];
+  delete s[LB_SYNCED_KEY];
   return s;
 }
 

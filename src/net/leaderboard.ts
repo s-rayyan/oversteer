@@ -1,5 +1,7 @@
-import { formatTime } from '../game/records';
-import { getFirebase } from './firebase';
+import { formatTime, getLocalBests } from '../game/records';
+import { getName } from '../game/player';
+import { LB_SYNCED_KEY } from '../game/saveMerge';
+import { firebaseConfigured, getFirebase } from './firebase';
 
 export const BOARD_ENDLESS = 'endless';
 export const BOARD_OVERSTEER = 'oversteer';
@@ -44,6 +46,7 @@ export async function submitScore(board: string, name: string, value: number): P
     /* rank is a nice-to-have */
   }
   cache.delete(board);
+  markSynced(uid, board, best);
   return { improved, best, rank };
 }
 
@@ -63,4 +66,57 @@ export async function fetchTop(board: string, n = 10): Promise<{ rows: ScoreRow[
   const rows = snap.docs.map((d) => d.data() as ScoreRow);
   cache.set(board, { at: Date.now(), rows });
   return { rows, myUid: uid };
+}
+
+// ---------- offline catch-up ----------
+// Scores set without a connection (or when the submit failed) are only in the local records. Remember which
+// bests the leaderboard has confirmed, and post any local best that is better than that once we're online.
+
+type Synced = { uid?: string; boards: Record<string, number> };
+
+function readSynced(): Synced {
+  try {
+    const raw = localStorage.getItem(LB_SYNCED_KEY);
+    if (raw) return JSON.parse(raw) as Synced;
+  } catch {
+    /* storage unavailable or corrupt */
+  }
+  return { boards: {} };
+}
+
+function markSynced(uid: string, board: string, value: number): void {
+  const s = readSynced();
+  if (s.uid !== uid) {
+    s.uid = uid;
+    s.boards = {};
+  }
+  s.boards[board] = value;
+  try {
+    localStorage.setItem(LB_SYNCED_KEY, JSON.stringify(s));
+  } catch {
+    /* storage unavailable */
+  }
+}
+
+let syncing = false;
+
+/** Posts every local best the leaderboard hasn't confirmed yet. Safe to call often; failures just wait for next time. */
+export async function syncLocalBests(): Promise<void> {
+  const name = getName();
+  if (syncing || !firebaseConfigured || !name || (typeof navigator !== 'undefined' && navigator.onLine === false)) return;
+  const done = readSynced().boards;
+  const pending = getLocalBests().filter(({ board, value }) => {
+    if ((board === BOARD_ENDLESS || board === BOARD_OVERSTEER) && value < 30) return false; // same cut-off as EndlessScene
+    const seen = done[board];
+    return seen === undefined || (higherIsBetter(board) ? value > seen : value < seen);
+  });
+  if (!pending.length) return;
+  syncing = true;
+  try {
+    for (const { board, value } of pending) await submitScore(board, name, value);
+  } catch {
+    /* offline or rules rejected: try again later */
+  } finally {
+    syncing = false;
+  }
 }

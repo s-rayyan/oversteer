@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { GAME_WIDTH, GAME_HEIGHT } from './game/config';
+import { syncLocalBests } from './net/leaderboard';
 import { isEmbedded, receiveSave, showLauncher } from './game/saveTransfer';
 import { BootScene } from './scenes/BootScene';
 import { GarageScene } from './scenes/GarageScene';
@@ -25,6 +26,10 @@ function start(): void {
     },
     scene: [BootScene, MenuScene, RaceScene, EndlessScene, OversteerScene, LeaderboardScene, GarageScene],
   });
+
+  // Catch up any scores earned while offline, now and whenever the connection returns.
+  void syncLocalBests();
+  window.addEventListener('online', () => void syncLocalBests());
 
   if (import.meta.env.DEV) (window as unknown as { __game: Phaser.Game }).__game = game;
 }
