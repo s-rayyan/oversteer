@@ -3,6 +3,7 @@ import { RACE_PAY } from '../game/cars';
 import { GAME_WIDTH, SceneKey } from '../game/config';
 import { GHOST_DT, GHOST_STRIDE, loadGhost, q1, saveGhostIfBest, type GhostData } from '../game/ghost';
 import { selectedCar } from '../game/profile';
+import { surfaceFlags, type SurfaceFlags } from '../game/surfaces';
 import { formatClock, formatTime, getRecord, submitRace } from '../game/records';
 import type { Pt } from '../game/spline';
 import { buildTrack, type RoadPt } from '../game/Track';
@@ -15,6 +16,7 @@ const WINDOW = 40; // samples searched either side of the last known position
 export class RaceScene extends DriveScene {
   private track!: TrackDef;
   private samples: RoadPt[] = [];
+  private flags: SurfaceFlags[] = [];
   private idx = 0;
   private total = 0; // signed samples travelled relative to the start line
   private maxTotal = 0;
@@ -43,6 +45,7 @@ export class RaceScene extends DriveScene {
   protected setupWorld(): Spawn {
     const built = buildTrack(this, this.track);
     this.samples = built.samples;
+    this.flags = surfaceFlags(this.samples.length, this.track);
     const b = built.bounds;
     this.cameras.main.setBounds(b.x, b.y, b.width, b.height);
 
@@ -110,6 +113,7 @@ export class RaceScene extends DriveScene {
       this.maxTotal = this.total;
       if (after > before && this.state === 'racing') this.crossLine(after);
     }
+    this.surface = this.flags[best];
     return Math.sqrt(bd) > this.samples[best].half;
   }
 

@@ -4,6 +4,8 @@ import {
 } from '../game/cars';
 import { GAME_HEIGHT, GAME_WIDTH, SceneKey } from '../game/config';
 import { buyCar, buyUpgrade, getCoins, getLevels, owns, selectCar, selectedCar, upgradeCost } from '../game/profile';
+import { TRACK_BEST } from '../game/trackBest';
+import { TRACKS } from '../game/tracks';
 import { CoinBadge } from '../game/ui';
 
 const BAR = { x: 176, w: 64, h: 4 };
@@ -148,7 +150,9 @@ export class GarageScene extends Phaser.Scene {
     this.blurb.setText(car.blurb);
     const cls = CAR_CLASSES[car.carClass];
     this.classTag.setText(cls.label).setColor(cls.color);
-    this.classBlurb.setText(cls.blurb).setColor(cls.color);
+    const wins = TRACKS.filter((t) => TRACK_BEST[t.id]?.best === car.carClass);
+    const fastest = wins.length === 0 ? '' : wins.length === 1 ? `Fastest on: ${wins[0].name}` : wins.length === 2 ? `Fastest on: ${wins[0].name}, ${wins[1].name}` : `Fastest on ${wins.length} tracks`;
+    this.classBlurb.setText(`${cls.blurb}\n${fastest}`).setColor(cls.color);
 
     this.bars.clear();
     const base = statBars(car.stats);

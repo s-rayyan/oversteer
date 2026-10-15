@@ -11,7 +11,7 @@
     "check:tracks": "node scripts/checkTracks.ts",
     "test:road": "node scripts/testEndlessRoad.ts",
     "check:cars": "node scripts/checkCars.ts",
-    "check:trackclasses": "node scripts/checkTrackClasses.ts"
+    "benchmark": "node scripts/benchmark.ts"
   },
   "dependencies": {
     "firebase": "^12.19.0",

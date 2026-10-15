@@ -7,6 +7,8 @@ import { getName, setName } from '../game/player';
 import { BOARD_ENDLESS, BOARD_OVERSTEER } from '../net/leaderboard';
 import { formatTime, getEndlessBest, getRecord } from '../game/records';
 import { sampleClosedSpline } from '../game/spline';
+import { surfaceFlags } from '../game/surfaces';
+import { TRACK_BEST } from '../game/trackBest';
 import { TRACK_CLASSES, classifyTrack, type TrackClassId } from '../game/trackClass';
 import { DIFFICULTY_COLOR, GROUPS, TRACKS } from '../game/tracks';
 
@@ -192,6 +194,19 @@ export class MenuScene extends Phaser.Scene {
     const mapped = pts.map((p) => new Phaser.Math.Vector2(ox + (p.x - minX) * sc, oy + (p.y - minY) * sc));
     this.preview.lineStyle(3, 0x3d405b).strokePoints(mapped, true);
     this.preview.lineStyle(1, Phaser.Display.Color.HexStringToColor(DIFFICULTY_COLOR[t.difficulty]).color).strokePoints(mapped, true);
+    // gravel (brown) and drift zones (blue) over the line; pads as yellow dots
+    const flags = surfaceFlags(mapped.length, t);
+    for (const [key, color] of [['rough', 0xc9a66b], ['zone', 0x4895ef]] as const) {
+      this.preview.lineStyle(2, color);
+      let run: Phaser.Math.Vector2[] = [];
+      flags.forEach((f, i) => {
+        if (f[key]) run.push(mapped[i]);
+        else { if (run.length > 1) this.preview.strokePoints(run, false); run = []; }
+      });
+      if (run.length > 1) this.preview.strokePoints(run, false);
+    }
+    this.preview.fillStyle(0xffd166);
+    flags.forEach((f, i) => { if (f.pad && !flags[(i - 1 + flags.length) % flags.length].pad) this.preview.fillRect(Math.floor(mapped[i].x) - 1, Math.floor(mapped[i].y) - 1, 3, 3); });
     this.preview.fillStyle(0xffffff).fillRect(Math.floor(mapped[0].x) - 1, Math.floor(mapped[0].y) - 1, 3, 3);
 
     let cid = classCache.get(t.id);
@@ -199,7 +214,7 @@ export class MenuScene extends Phaser.Scene {
     const tc = TRACK_CLASSES[cid];
     // Speedsters are the default pick almost everywhere, so only say something when they are NOT recommended.
     this.classInfo
-      .setText(tc.bestCar === 'speedster' ? tc.label : `${tc.label}: no speedsters!`)
+      .setText(TRACK_BEST[t.id]?.bestRole === 'speedster' ? tc.label : `${tc.label}: no speedsters!`)
       .setColor(tc.color);
 
     const rec = getRecord(t.id);

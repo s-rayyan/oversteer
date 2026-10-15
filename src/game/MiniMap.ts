@@ -2,6 +2,9 @@ import Phaser from 'phaser';
 import { GAME_HEIGHT, GAME_WIDTH } from './config';
 import type { Pt } from './spline';
 
+/** Road point that may carry special-surface flags. */
+type FlaggedPt = Pt & { rough?: boolean; pad?: boolean; zone?: boolean };
+
 const BOX = { w: 64, h: 44 };
 const PAD = 5;
 const FOLLOW_SCALE = 0.1; // world px -> minimap px when following the car
@@ -18,7 +21,7 @@ export class MiniMap {
   private fit: { ox: number; oy: number; s: number } | null = null;
   private frame = 0;
 
-  constructor(scene: Phaser.Scene, full: Pt[] | null) {
+  constructor(scene: Phaser.Scene, full: FlaggedPt[] | null) {
     scene.add.rectangle(this.x, this.y, BOX.w, BOX.h, 0x14121f, 0.94).setOrigin(0)
       .setStrokeStyle(1, 0x3d405b).setScrollFactor(0).setDepth(100);
     this.road = scene.add.graphics().setScrollFactor(0).setDepth(101);
@@ -33,8 +36,21 @@ export class MiniMap {
       const h = Math.max(...ys) - minY;
       const s = Math.min((BOX.w - PAD * 2) / w, (BOX.h - PAD * 2) / h);
       this.fit = { s, ox: this.x + (BOX.w - w * s) / 2 - minX * s, oy: this.y + (BOX.h - h * s) / 2 - minY * s };
-      const pts = full.filter((_, i) => i % 6 === 0).map((p) => this.toBox(p.x, p.y));
+      const sampled = full.filter((_, i) => i % 6 === 0);
+      const pts = sampled.map((p) => this.toBox(p.x, p.y));
       this.stroke([pts.concat(pts[0])]);
+      // gravel (brown) and drift zones (blue) drawn over the road line; pads as yellow dots
+      for (const [key, color] of [['rough', 0xc9a66b], ['zone', 0x4895ef]] as const) {
+        this.road.lineStyle(1, color);
+        let run: Pt[] = [];
+        sampled.forEach((p, i) => {
+          if (p[key]) run.push(pts[i]);
+          else { if (run.length > 1) this.road.strokePoints(run, false); run = []; }
+        });
+        if (run.length > 1) this.road.strokePoints(run, false);
+      }
+      this.road.fillStyle(0xffd166);
+      sampled.forEach((p, i) => { if (p.pad && !sampled[(i - 1 + sampled.length) % sampled.length].pad) this.road.fillRect(pts[i].x - 1, pts[i].y - 1, 2, 2); });
       this.road.fillStyle(0xffffff).fillRect(pts[0].x - 1, pts[0].y - 1, 2, 2); // start line
     }
   }

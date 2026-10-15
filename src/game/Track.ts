@@ -1,10 +1,19 @@
 import Phaser from 'phaser';
 import { sampleClosedSpline, type Pt } from './spline';
+import { surfaceFlags } from './surfaces';
 import type { TrackDef } from './tracks';
 
 export interface RoadPt extends Pt {
   half: number;
+  /** Special surfaces (see surfaces.ts); absent on the endless road. */
+  rough?: boolean;
+  pad?: boolean;
+  zone?: boolean;
 }
+
+const ASPHALT = 0x3d405b;
+const GRAVEL = 0x6f5b3d;
+const DRIFT_ZONE = 0x3b3f73;
 
 export interface BuiltTrack {
   samples: RoadPt[];
@@ -27,21 +36,64 @@ export function paintRoad(
   i1: number,
 ): void {
   for (let i = i0; i <= i1; i++) {
-    kerb.fillStyle(Math.floor(i / 3) % 2 ? 0xf1faee : 0xe63946).fillCircle(pts[i].x, pts[i].y, pts[i].half + KERB);
+    const stripe = Math.floor(i / 3) % 2 === 1;
+    // drift zones have blue kerbs, everything else red
+    kerb.fillStyle(stripe ? 0xf1faee : pts[i].zone ? 0x4895ef : 0xe63946).fillCircle(pts[i].x, pts[i].y, pts[i].half + KERB);
   }
   for (let i = i0; i <= i1; i++) {
-    road.fillStyle(0x3d405b).fillCircle(pts[i].x, pts[i].y, pts[i].half);
+    road.fillStyle(pts[i].rough ? GRAVEL : pts[i].zone ? DRIFT_ZONE : ASPHALT).fillCircle(pts[i].x, pts[i].y, pts[i].half);
   }
-  for (let i = i0; i <= i1; i += 2) {
+  for (let i = i0; i <= i1; i += pts[i].rough ? 1 : 2) {
     const a = rng.frac() * Math.PI * 2;
     const r = rng.frac() * (pts[i].half - 4);
+    const light = rng.frac() > 0.5;
+    const color = pts[i].rough ? (light ? 0x8a7550 : 0x57472d) : pts[i].zone ? (light ? 0x4a4f86 : 0x33376a) : light ? 0x464a6b : 0x363955;
     road
-      .fillStyle(rng.frac() > 0.5 ? 0x464a6b : 0x363955, 0.8)
+      .fillStyle(color, 0.8)
       .fillRect(Math.floor(pts[i].x + Math.cos(a) * r), Math.floor(pts[i].y + Math.sin(a) * r), 1, 1);
   }
   for (let i = i0; i <= i1; i++) {
-    if (Math.floor(i / 4) % 2) continue;
-    road.fillStyle(0xe9c46a).fillRect(Math.floor(pts[i].x) - 1, Math.floor(pts[i].y) - 1, 2, 2);
+    if (Math.floor(i / 4) % 2 || pts[i].rough) continue;
+    road.fillStyle(pts[i].zone ? 0x9ad1ff : 0xe9c46a).fillRect(Math.floor(pts[i].x) - 1, Math.floor(pts[i].y) - 1, 2, 2);
+  }
+  paintPads(road, pts, i0, i1);
+}
+
+/** Boost pads: a dark strip with yellow chevrons pointing along the road. */
+function paintPads(g: Phaser.GameObjects.Graphics, pts: RoadPt[], i0: number, i1: number): void {
+  let start = -1;
+  for (let i = i0; i <= i1 + 1; i++) {
+    const on = i <= i1 && !!pts[i].pad;
+    if (on && start < 0) start = i;
+    if (!on && start >= 0) {
+      const a = pts[start];
+      const b = pts[i - 1];
+      const len = Math.max(8, Math.hypot(b.x - a.x, b.y - a.y));
+      const dx = (b.x - a.x) / len;
+      const dy = (b.y - a.y) / len;
+      const w = a.half * 1.5;
+      const nx = -dy;
+      const ny = dx;
+      g.fillStyle(0x1d1b2e).fillPoints([
+        { x: a.x + nx * w / 2, y: a.y + ny * w / 2 }, { x: b.x + nx * w / 2, y: b.y + ny * w / 2 },
+        { x: b.x - nx * w / 2, y: b.y - ny * w / 2 }, { x: a.x - nx * w / 2, y: a.y - ny * w / 2 },
+      ], true);
+      for (let k = 0; k < 3; k++) {
+        const cx = a.x + dx * len * (0.2 + 0.3 * k);
+        const cy = a.y + dy * len * (0.2 + 0.3 * k);
+        g.fillStyle(0xffd166).fillTriangle(
+          cx + dx * 7, cy + dy * 7,
+          cx - dx * 3 + nx * w * 0.38, cy - dy * 3 + ny * w * 0.38,
+          cx - dx * 3 - nx * w * 0.38, cy - dy * 3 - ny * w * 0.38,
+        );
+        g.fillStyle(0x1d1b2e).fillTriangle(
+          cx + dx * 3, cy + dy * 3,
+          cx - dx * 6 + nx * w * 0.3, cy - dy * 6 + ny * w * 0.3,
+          cx - dx * 6 - nx * w * 0.3, cy - dy * 6 - ny * w * 0.3,
+        );
+      }
+      start = -1;
+    }
   }
 }
 
@@ -67,7 +119,9 @@ export function treeDepth(y: number): number {
 }
 
 export function buildTrack(scene: Phaser.Scene, def: TrackDef): BuiltTrack {
-  const samples: RoadPt[] = sampleClosedSpline(def.points, 4, def.roadWidth).map((p) => ({ x: p.x, y: p.y, half: p.w / 2 }));
+  const raw = sampleClosedSpline(def.points, 4, def.roadWidth);
+  const flags = surfaceFlags(raw.length, def);
+  const samples: RoadPt[] = raw.map((p, i) => ({ x: p.x, y: p.y, half: p.w / 2, ...flags[i] }));
 
   const xs = samples.map((p) => p.x);
   const ys = samples.map((p) => p.y);

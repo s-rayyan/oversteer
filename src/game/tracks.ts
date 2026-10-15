@@ -1,4 +1,5 @@
 import type { CtrlPt } from './spline';
+import type { SurfaceDef } from './surfaces';
 
 export type Theme = 'grass' | 'desert' | 'snow' | 'night';
 export type Difficulty = 'Easy' | 'Medium' | 'Hard' | 'Expert';
@@ -10,7 +11,7 @@ export interface TrackGroup {
   blurb: string;
 }
 
-export interface TrackDef {
+export interface TrackDef extends SurfaceDef {
   id: string;
   name: string;
   group: string;
@@ -33,6 +34,7 @@ export const GROUPS: TrackGroup[] = [
   { id: 'desert', name: 'Desert Rally', short: 'DESERT', blurb: 'Hairpins and long straights.' },
   { id: 'alpine', name: 'Alpine Series', short: 'ALPINE', blurb: 'Narrow, twisty, icy.' },
   { id: 'pro', name: 'Pro Circuit', short: 'PRO', blurb: 'Night races. No mercy.' },
+  { id: 'special', name: 'Specialist Series', short: 'SPECIAL', blurb: 'Every track here rewards one kind of car.' },
 ];
 
 export const DIFFICULTY_COLOR: Record<Difficulty, string> = {
@@ -146,5 +148,37 @@ export const TRACKS: TrackDef[] = [
     id: 'razor', name: 'Razor', group: 'pro', difficulty: 'Expert', theme: 'night',
     points: [[1633,1016,50],[1864,1268,50],[1741,1521,89],[1446,1621,50],[1029,1644,50],[558,1640,89],[211,1503,50],[150,1245,50],[395,1010,89],[604,893,89],[533,655,50],[569,370,89],[1010,150,89],[1374,338,50],[1433,681,50],[1375,890,89]],
     roadWidth: 89, laps: 2,
+  },
+  // ---- Specialist Series: each track rewards one kind of car ----
+  {
+    id: 'hairpin-alley', name: 'Hairpin Alley', group: 'special', difficulty: 'Hard', theme: 'night',
+    points: [[500,300],[760,300],[794,314],[808,348],[794,382],[760,396],[500,396],[466,410],[452,444],[466,478],[500,492],[760,492],[794,506],[808,540],[794,574],[760,588],[500,588],[466,602],[452,636],[466,670],[500,684],[760,684],[794,698],[808,732],[794,766],[760,780],[500,780],[466,794],[452,828],[466,862],[500,876],[760,876],[794,890],[808,924],[794,958],[760,972],[500,972],[422,972],[380,954],[362,912],[362,360],[380,318],[422,300]],
+    roadWidth: 46, laps: 3,
+  },
+  {
+    id: 'gravel-rally', name: 'Gravel Rally', group: 'special', difficulty: 'Medium', theme: 'desert',
+    points: [[1430,779],[1547,1030],[1396,1343],[901,1359],[576,1183],[362,1054],[150,825],[292,490],[594,285],[1036,150],[1384,230],[1507,604]],
+    roadWidth: 70, laps: 3,
+    rough: [[0.519,0.832],[0.174,0.311]],
+  },
+  {
+    id: 'boost-highway', name: 'Boost Highway', group: 'special', difficulty: 'Medium', theme: 'night',
+    points: [[1962,501],[1760,714],[1422,887],[633,1034],[150,788],[199,554],[408,324],[809,150],[1388,174],[1790,301]],
+    roadWidth: 66, laps: 3,
+    pads: [0.041,0.125,0.208,0.291,0.375,0.519,0.612,0.705,0.798],
+  },
+  {
+    id: 'drift-ring', name: 'Drift Ring', group: 'special', difficulty: 'Hard', theme: 'snow',
+    points: [[1309,901],[1473,1116],[1404,1320],[1161,1439],[804,1483],[486,1480],[225,1376],[150,1085],[332,886],[472,765],[451,633],[487,338],[789,150],[1144,334],[1189,599],[1164,805]],
+    roadWidth: 60, laps: 3,
+    zones: [[0.044,0.129],[0.377,0.411],[0.453,0.489],[0.557,0.606],[0.658,0.682],[0.742,0.77],[0.84,0.87],[0.942,0.977]],
+  },
+  {
+    id: 'grand-tour', name: 'Grand Tour', group: 'special', difficulty: 'Expert', theme: 'grass',
+    points: [[1352,749],[1215,879],[1224,1084],[1078,1338],[693,1385],[468,1027],[496,848],[347,737],[150,518],[299,229],[697,150],[1008,163],[1335,234],[1530,533]],
+    roadWidth: 58, laps: 3,
+    rough: [[0.619,0.739]],
+    pads: [0.107,0.191,0.297],
+    zones: [[0.028,0.064],[0.081,0.098],[0.148,0.174],[0.241,0.277]],
   },
 ];

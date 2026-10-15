@@ -28,4 +28,17 @@ whatever they typed (12 chars). Rules only allow a player to write their own doc
 **Caveat:** scores are submitted by the client, so a determined player can post a fake time within the allowed range.
 The rules bound the values but cannot verify a run; real anti-cheat needs server-side replay validation.
 
+## Cars, tracks and balance
+
+- **Car classes** (All-Rounder, Speedster, Grip Racer, Drifter, Off-Roader, Booster, Agile, Hypercar) are defined by rules on
+  their stats (`src/game/cars.ts`). `npm run check:cars` fails if a car matches no class or more than one.
+- **Track features:** gravel sections (cars keep `offRoadCap` of their speed: off-roaders win), boost pads (refill `padGain` of
+  the boost meter: boosters win), drift zones (low-grip cars charge boost fast in them) and hairpins/technical corners.
+  See `src/game/surfaces.ts`; tracks list them as fractions of the lap.
+- **Balance:** `npm run benchmark` laps every track with every car in a headless simulator (`scripts/sim.ts`, the game's own
+  physics) and checks that every car class wins at least one track. `npm run benchmark -- --write` regenerates
+  `src/game/trackBest.ts`, which the menu reads. Paste `scripts/benchmarkLaps.js` into the browser console to confirm the
+  real game still matches the simulator.
+- Cars are driven by a simple line-following bot, so the benchmark measures clean-racing pace, not skilled play.
+
 Tools: `npm run check:tracks` validates track layouts; `npm run check:cars` verifies car classes; `npm run check:trackclasses` checks each track's recommended car class against the lap benchmark (`scripts/benchmarkLaps.js` regenerates it); `npm run test:road` stress-tests the endless-road generator (add `--legacy` to see the old, broken one fail).

@@ -1,5 +1,7 @@
 import Phaser from 'phaser';
 import { Car } from '../game/Car';
+import { DRIFT_MIN_SPEED, DRIFT_SLIP, ZONE_CHARGE_MULT, chargeBoost, drainBoost } from '../game/carPhysics';
+import type { SurfaceFlags } from '../game/surfaces';
 import type { CarStats } from '../game/cars';
 import { GAME_HEIGHT, GAME_WIDTH, SceneKey } from '../game/config';
 import { getName, setName } from '../game/player';
@@ -56,6 +58,7 @@ export abstract class DriveScene extends Phaser.Scene {
   private skidsDirty = false;
   private countdown = 3;
   private paused = false;
+  private wasPad = false;
   private camPos = new Phaser.Math.Vector2();
   private runId = 0;
   private stats!: CarStats;
@@ -73,6 +76,8 @@ export abstract class DriveScene extends Phaser.Scene {
   protected abstract setupWorld(): Spawn;
   /** Per-frame mode logic (progress, laps, ...). Returns true when the car is on grass. */
   protected abstract updateMode(dt: number): boolean;
+  /** Special surface under the car (gravel, boost pad, drift zone); set by the mode in updateMode. */
+  protected surface: SurfaceFlags = { rough: false, pad: false, zone: false };
   protected abstract hudLines(): string[];
   /** Whole-track outline for the minimap, or null to follow the car (endless). */
   protected abstract mapStatic(): Pt[] | null;
@@ -105,6 +110,8 @@ export abstract class DriveScene extends Phaser.Scene {
     this.lostTimer = 0;
     this.driftBank = 0;
     this.paidCoins = 0;
+    this.wasPad = false;
+    this.surface = { rough: false, pad: false, zone: false };
     this.stats = equippedStats();
     if (this.autoDrive) {
       // OVERSTEER: a much stronger boost that refills much faster (but it can still run dry).
@@ -299,14 +306,16 @@ export abstract class DriveScene extends Phaser.Scene {
 
     const off = this.updateMode(dt);
     this.car.offRoad = off;
+    this.car.rough = !off && this.surface.rough;
     this.car.update(dt, throttle, steer, boosting, handbrake);
     this.updateCamera(dt);
     if (boosting) {
-      this.boost = Math.max(0, this.boost - this.stats.boostDrain * dt);
+      this.boost = drainBoost(this.boost, this.stats, dt);
       const p = this.car.point(-8, 0);
       this.flame.emitParticleAt(p.x, p.y, 2);
     }
     this.effects(off, dt);
+    this.pickUpPad(off);
     this.trackDrift(off, dt);
     this.drawBoost(boosting);
     this.hud.setText(this.hudLines().join('\n'));
@@ -322,10 +331,11 @@ export abstract class DriveScene extends Phaser.Scene {
   /** Drift chains earn coins; they're banked after a short straight, and lost if you touch the grass. */
   private trackDrift(off: boolean, dt: number): void {
     if (this.state === 'racing') {
-      const sliding = !off && this.car.slip > 0.18 && this.car.speed > 25;
+      const slip = this.slipNow();
+      const sliding = !off && slip > DRIFT_SLIP && this.car.speed > DRIFT_MIN_SPEED;
       if (sliding) {
         this.chainTime += dt;
-        this.driftChain += this.car.slip * dt * DRIFT_COIN_RATE * (1 + this.chainTime * 0.4);
+        this.driftChain += slip * dt * DRIFT_COIN_RATE * (1 + this.chainTime * 0.4);
         this.slideIdle = 0;
       } else if (off && this.driftChain > 0) {
         this.driftChain = 0;
@@ -383,20 +393,36 @@ export abstract class DriveScene extends Phaser.Scene {
       .fillStyle(boosting ? 0xe63946 : full ? 0xffd166 : 0xf4a261).fillRect(x, y, Math.floor(w * this.boost), 4);
   }
 
+  /** Sideways slip as the game counts it: in drift zones it ignores tyre heat. */
+  private slipNow(): number {
+    return this.surface.zone ? this.car.phys.rawSlip : this.car.slip;
+  }
+
+  /** Boost pads refill part of the boost meter once per pass (more for cars with a high padGain). */
+  private pickUpPad(off: boolean): void {
+    const now = !off && this.surface.pad;
+    if (now && !this.wasPad && this.state === 'racing') {
+      this.boost = Math.min(1, this.boost + this.stats.padGain);
+      this.showFlash('BOOST PAD!', 600);
+    }
+    this.wasPad = now;
+  }
+
   private effects(off: boolean, dt: number): void {
     if (off) {
       if (this.car.speed > 25) {
         const p = this.car.point(-7, 0);
         this.dust.emitParticleAt(p.x, p.y, 1);
       }
-    } else if (this.car.slip > 0.18 && this.car.speed > 25) {
+    } else if (this.slipNow() > DRIFT_SLIP && this.car.speed > DRIFT_MIN_SPEED) {
       for (const side of [-3, 3]) {
         const p = this.car.point(-5, side);
         this.skids.push([Math.floor(p.x), Math.floor(p.y)]);
       }
       if (this.skids.length > SKID_CAP) this.skids.splice(0, this.skids.length - SKID_CAP);
       this.skidsDirty = true;
-      if (this.state === 'racing') this.boost = Math.min(1, this.boost + this.car.slip * this.stats.boostCharge * dt);
+      // in a drift zone slip ignores tyre heat and charges boost faster
+      if (this.state === 'racing') this.boost = chargeBoost(this.boost, this.slipNow() * (this.surface.zone ? ZONE_CHARGE_MULT : 1), this.stats, dt);
       const rear = this.car.point(-7, 0);
       this.smoke.emitParticleAt(rear.x, rear.y, 1);
     }

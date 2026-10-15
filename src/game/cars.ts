@@ -9,7 +9,8 @@ export interface CarStats {
   boostDrain: number; // meter/s while boosting (lower = longer boost)
   boostAccel: number; // accel multiplier while boosting
   boostSpeed: number; // top-speed multiplier while boosting
-  offRoadCap: number; // fraction of top speed kept on grass
+  offRoadCap: number; // fraction of top speed kept on grass and gravel
+  padGain: number; // boost meter added by a boost pad (0..1)
 }
 
 export type CarClassId = 'allrounder' | 'speedster' | 'gripracer' | 'drifter' | 'offroader' | 'booster' | 'agile' | 'hypercar';
@@ -31,44 +32,44 @@ export interface CarClass {
 export const CAR_CLASSES: Record<CarClassId, CarClass> = {
   allrounder: {
     id: 'allrounder', label: 'ALL-ROUNDER', color: '#c9d1e3',
-    blurb: 'Balanced. No weakness, no standout strength.',
-    matches: (s) => s.maxSpeed >= 110 && s.maxSpeed <= 135 && s.turnRate >= 2.2 && s.turnRate <= 2.6 && s.grip >= 2.3 && s.grip <= 3.0
-      && s.offRoadCap <= 0.5 && s.boostCharge >= 0.4 && s.boostCharge <= 0.7 && s.boostDrain >= 0.4,
+    blurb: 'Balanced. Wins on tracks that mix every challenge.',
+    matches: (s) => s.maxSpeed >= 120 && s.maxSpeed <= 145 && s.turnRate >= 2.5 && s.turnRate <= 3.0 && s.grip >= 2.2 && s.grip <= 3.0
+      && s.accel >= 110 && s.offRoadCap >= 0.5 && s.offRoadCap <= 0.7 && s.padGain >= 0.6,
   },
   speedster: {
     id: 'speedster', label: 'SPEEDSTER', color: '#ffd166',
-    blurb: 'Highest top speed and acceleration. Weak turning.',
-    matches: (s) => s.maxSpeed >= 140 && s.turnRate <= 2.0,
+    blurb: 'Top speed and acceleration, poor turning.',
+    matches: (s) => s.maxSpeed >= 140 && s.turnRate <= 1.7,
   },
   gripracer: {
     id: 'gripracer', label: 'GRIP RACER', color: '#4895ef',
-    blurb: 'Stable and precise on tarmac. Slow to charge boost.',
-    matches: (s) => s.grip >= 3.0 && s.turnRate < 3.0 && s.boostCharge <= 0.7 && s.offRoadCap < 0.8 && s.maxSpeed < 155,
+    blurb: 'Huge grip. Wins on technical tracks.',
+    matches: (s) => s.grip >= 3.5 && s.turnRate < 3.0 && s.boostCharge <= 0.7 && s.offRoadCap < 0.8 && s.maxSpeed < 155,
   },
   drifter: {
     id: 'drifter', label: 'DRIFTER', color: '#f4a261',
-    blurb: 'Low grip: slides easily and fills boost fast.',
-    matches: (s) => s.grip <= 1.6 && s.boostCharge >= 0.9,
+    blurb: 'Low grip, fills boost fastest in drift zones.',
+    matches: (s) => s.grip <= 1.7 && s.boostCharge >= 1.0,
   },
   offroader: {
     id: 'offroader', label: 'OFF-ROADER', color: '#52b788',
-    blurb: 'Keeps its speed on grass. Gives up some tarmac pace.',
+    blurb: 'Keeps its speed on gravel and grass.',
     matches: (s) => s.offRoadCap >= 0.8,
   },
   booster: {
     id: 'booster', label: 'BOOSTER', color: '#e63946',
-    blurb: 'Huge boost tank and a stronger boost kick.',
-    matches: (s) => s.boostDrain <= 0.3 && s.boostSpeed >= 1.4 && s.maxSpeed < 155,
+    blurb: 'Big boost tank; best on boost pads.',
+    matches: (s) => s.boostDrain <= 0.3 && s.boostSpeed >= 1.4 && s.maxSpeed < 150,
   },
   agile: {
     id: 'agile', label: 'AGILE', color: '#c77dff',
-    blurb: 'Tiny and twitchy. Best turning, lowest top speed.',
-    matches: (s) => s.turnRate >= 3.0 && s.maxSpeed <= 105,
+    blurb: 'Tiny and twitchy. Wins on hairpins.',
+    matches: (s) => s.turnRate >= 3.0 && s.maxSpeed <= 120,
   },
   hypercar: {
     id: 'hypercar', label: 'HYPERCAR', color: '#00b4d8',
-    blurb: 'Top-tier in every stat. Nothing to compensate for.',
-    matches: (s) => s.maxSpeed >= 155 && s.grip >= 3.0,
+    blurb: 'Premium all-rounder. Specialists can beat it.',
+    matches: (s) => s.maxSpeed >= 145 && s.grip >= 2.0 && s.grip <= 3.2 && s.padGain <= 0.3,
   },
 };
 
@@ -87,71 +88,71 @@ export interface CarDef {
 
 const BASE: CarStats = {
   accel: 100, brake: 150, maxSpeed: 115, turnRate: 2.3, grip: 2.4,
-  boostCharge: 0.5, boostDrain: 0.5, boostAccel: 1.6, boostSpeed: 1.25, offRoadCap: 0.4,
+  boostCharge: 0.5, boostDrain: 0.5, boostAccel: 1.6, boostSpeed: 1.25, offRoadCap: 0.4, padGain: 0.5,
 };
 
 const CAR_LIST: CarDef[] = [
-  { id: 'hatch', name: 'Hatchback', blurb: 'Balanced and forgiving. Everyone starts here.', price: 0, carClass: 'allrounder', color: 0xe63946, stats: BASE },
+  { id: 'hatch', name: 'Hatchback', blurb: 'Balanced and forgiving. Everyone starts here.', price: 0, carClass: 'allrounder', color: 0xe63946, stats: { ...BASE, maxSpeed: 124, accel: 113, turnRate: 2.68, grip: 2.31, boostCharge: 0.81, boostSpeed: 1.5, offRoadCap: 0.6, padGain: 0.7 } },
   {
     id: 'gripper', name: 'Gripper', blurb: 'Glued to the road.', price: 400, carClass: 'gripracer', color: 0x4895ef,
-    stats: { ...BASE, maxSpeed: 126, accel: 105, turnRate: 2.5, grip: 3.6, boostCharge: 0.35, boostDrain: 0.55 },
+    stats: { ...BASE, maxSpeed: 138, accel: 119, turnRate: 2.27, grip: 5.0, boostCharge: 0.33, boostDrain: 0.55 },
   },
   {
     id: 'drifter', name: 'Drifter', blurb: 'Slides everywhere and fills boost fast.', price: 600, carClass: 'drifter', color: 0xf4a261,
-    stats: { ...BASE, maxSpeed: 112, turnRate: 2.6, grip: 1.6, boostCharge: 0.9 },
+    stats: { ...BASE, maxSpeed: 135, turnRate: 2.33, grip: 1.61, boostCharge: 1.13, boostDrain: 0.36, boostSpeed: 1.7 },
   },
   {
     id: 'rally', name: 'Rally Truck', blurb: 'Barely cares about grass. Slower on tarmac.', price: 800, carClass: 'offroader', color: 0x52b788,
-    stats: { ...BASE, maxSpeed: 108, accel: 95, grip: 2.2, offRoadCap: 0.8 },
+    stats: { ...BASE, maxSpeed: 121, accel: 104, grip: 2.2, offRoadCap: 0.8 },
   },
   {
     id: 'dragster', name: 'Dragster', blurb: 'Rocket on the straights. Turning is a suggestion.', price: 1200, carClass: 'speedster', color: 0xffd166,
-    stats: { ...BASE, maxSpeed: 150, accel: 140, brake: 130, turnRate: 1.9, grip: 2.0 },
+    stats: { ...BASE, maxSpeed: 164, accel: 152, brake: 130, turnRate: 1.58, grip: 1.69, boostSpeed: 1.05, offRoadCap: 0.3, padGain: 0.49 },
   },
   {
     id: 'bruiser', name: 'Bruiser', blurb: 'Huge boost tank and a bigger kick.', price: 1500, carClass: 'booster', color: 0x8d99ae,
-    stats: { ...BASE, maxSpeed: 125, accel: 115, boostCharge: 0.6, boostDrain: 0.3, boostSpeed: 1.4 },
+    stats: { ...BASE, maxSpeed: 124, accel: 123, boostCharge: 0.6, boostDrain: 0.3, boostSpeed: 1.52, padGain: 0.6 },
   },
   // ---- more cars, roughly cheapest to priciest ----
   {
     id: 'kart', name: 'Go-Kart', blurb: 'Tiny, twitchy and glued to the floor.', price: 300, carClass: 'agile', color: 0xffb703, size: [12, 7], stripe: 0x14121f,
-    stats: { ...BASE, maxSpeed: 100, accel: 130, turnRate: 3.0, grip: 3.4, boostSpeed: 1.15 },
+    stats: { ...BASE, maxSpeed: 117, accel: 165, turnRate: 3.09, grip: 4.03, boostSpeed: 1.15 },
   },
   {
     id: 'sedan', name: 'Sedan', blurb: 'A touch better than the hatchback in every way.', price: 250, carClass: 'allrounder', color: 0x2ec4b6,
-    stats: { ...BASE, maxSpeed: 119, accel: 103, turnRate: 2.35, grip: 2.6 },
+    stats: { ...BASE, maxSpeed: 128, accel: 116, turnRate: 2.74, grip: 2.51, boostCharge: 0.81, boostSpeed: 1.5, offRoadCap: 0.6, padGain: 0.7 },
   },
   {
     id: 'buggy', name: 'Buggy', blurb: 'Treats grass like a road. Light and bouncy.', price: 700, carClass: 'offroader', color: 0xcaa56b, size: [14, 9], stripe: 0x6b4226,
-    stats: { ...BASE, maxSpeed: 105, accel: 112, turnRate: 2.5, grip: 2.0, offRoadCap: 0.9 },
+    stats: { ...BASE, maxSpeed: 118, accel: 122, turnRate: 2.5, grip: 2, offRoadCap: 0.9 },
   },
   {
     id: 'coupe', name: 'Coupe', blurb: 'Sporty all-rounder with decent boost.', price: 900, carClass: 'allrounder', color: 0xc77dff,
-    stats: { ...BASE, maxSpeed: 130, accel: 115, turnRate: 2.4, grip: 2.8, boostCharge: 0.55 },
+    stats: { ...BASE, maxSpeed: 140, accel: 130, turnRate: 2.8, grip: 2.7, boostCharge: 0.9, boostSpeed: 1.5, offRoadCap: 0.6, padGain: 0.7 },
   },
   {
     id: 'muscle', name: 'Muscle', blurb: 'Loud, heavy and always sideways.', price: 1000, carClass: 'speedster', color: 0x9d0208, size: [18, 10], stripe: 0xf1faee,
-    stats: { ...BASE, maxSpeed: 140, accel: 130, brake: 140, turnRate: 2.0, grip: 1.9, boostCharge: 0.4 },
+    stats: { ...BASE, maxSpeed: 153, accel: 141, brake: 140, turnRate: 1.67, grip: 1.6, boostCharge: 0.4, boostSpeed: 1.05, offRoadCap: 0.3, padGain: 0.49 },
   },
   {
     id: 'tank', name: 'Tank', blurb: 'Plows through grass and boosts for ages.', price: 2000, carClass: 'offroader', color: 0x4f772d, size: [18, 11], stripe: 0x90a955,
-    stats: { ...BASE, maxSpeed: 110, accel: 90, turnRate: 2.0, grip: 3.2, boostDrain: 0.25, boostSpeed: 1.3, offRoadCap: 0.95 },
+    stats: { ...BASE, maxSpeed: 123, accel: 98, turnRate: 2, grip: 3.2, boostDrain: 0.25, boostSpeed: 1.3, offRoadCap: 0.95 },
   },
   {
     id: 'rocket', name: 'Rocket', blurb: 'Absurd top speed. Steering optional.', price: 2500, carClass: 'speedster', color: 0xf1faee, size: [18, 8], stripe: 0xe63946,
-    stats: { ...BASE, maxSpeed: 160, accel: 150, turnRate: 1.8, grip: 2.2, boostSpeed: 1.35, boostCharge: 0.45 },
+    stats: { ...BASE, maxSpeed: 175, accel: 163, turnRate: 1.5, grip: 1.85, boostCharge: 0.45, boostSpeed: 1.13, offRoadCap: 0.3, padGain: 0.49 },
   },
   {
     id: 'phantom', name: 'Phantom', blurb: 'Precise and fast. Rewards clean drifts.', price: 3200, carClass: 'gripracer', color: 0x3a0ca3, size: [17, 9], stripe: 0xc77dff,
-    stats: { ...BASE, maxSpeed: 140, accel: 125, turnRate: 2.8, grip: 3.0, boostCharge: 0.7, boostDrain: 0.4 },
+    stats: { ...BASE, maxSpeed: 153, accel: 141, turnRate: 2.53, grip: 4.17, boostCharge: 0.66, boostDrain: 0.4 },
   },
   {
     id: 'comet', name: 'Comet', blurb: 'Almost the best car in the game.', price: 4200, carClass: 'hypercar', color: 0x00b4d8, size: [17, 9], stripe: 0xffffff,
-    stats: { ...BASE, maxSpeed: 155, accel: 140, turnRate: 2.6, grip: 3.0, boostCharge: 0.8, boostDrain: 0.35, boostSpeed: 1.35 },
+    stats: { ...BASE, maxSpeed: 147, accel: 129, turnRate: 1.8, grip: 2.45, boostSpeed: 1.15, offRoadCap: 0.3, padGain: 0.2 },
   },
   {
     id: 'legend', name: 'Legend', blurb: 'The best car in the game. Gold paint included.', price: 6500, carClass: 'hypercar', color: 0xd4af37, size: [18, 9], stripe: 0x14121f,
-    stats: { ...BASE, maxSpeed: 170, accel: 155, turnRate: 2.8, grip: 3.3, boostCharge: 1.0, boostDrain: 0.3, boostSpeed: 1.4, offRoadCap: 0.6 },
+    stats: { ...BASE, maxSpeed: 162, accel: 142, turnRate: 1.94, grip: 2.69, boostCharge: 0.62, boostDrain: 0.43, boostSpeed: 1.19, offRoadCap: 0.45, padGain: 0.2 },
   },
 ];
 
