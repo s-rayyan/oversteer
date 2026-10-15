@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import {
-  CARS, MAX_LEVEL, UPGRADES, UPGRADE_KEYS, effectiveStats, noUpgrades, statBars, type UpgradeKey,
+  CARS, CAR_CLASSES, MAX_LEVEL, UPGRADES, UPGRADE_KEYS, effectiveStats, noUpgrades, statBars, type UpgradeKey,
 } from '../game/cars';
 import { GAME_HEIGHT, GAME_WIDTH, SceneKey } from '../game/config';
 import { buyCar, buyUpgrade, getCoins, getLevels, owns, selectCar, selectedCar, upgradeCost } from '../game/profile';
@@ -18,6 +18,8 @@ export class GarageScene extends Phaser.Scene {
   private preview!: Phaser.GameObjects.Image;
   private title!: Phaser.GameObjects.Text;
   private blurb!: Phaser.GameObjects.Text;
+  private classTag!: Phaser.GameObjects.Text;
+  private classBlurb!: Phaser.GameObjects.Text;
   private bars!: Phaser.GameObjects.Graphics;
   private barLabels: Phaser.GameObjects.Text[] = [];
   private upRows: Phaser.GameObjects.Text[] = [];
@@ -51,6 +53,8 @@ export class GarageScene extends Phaser.Scene {
     this.add.rectangle(140, 22, 1, 130, 0x3d405b).setOrigin(0);
     this.preview = this.add.image(166, 36, 'car-hatch').setScale(3);
     this.title = this.add.text(190, 24, '', { ...mono, fontSize: '10px', color: '#ffd166' });
+    this.classTag = this.add.text(GAME_WIDTH - 4, 26, '', mono).setOrigin(1, 0);
+    this.classBlurb = this.add.text(10, 142, '', { ...mono, fontSize: '7px', wordWrap: { width: 126 } });
     this.blurb = this.add.text(190, 36, '', { ...mono, color: '#8d99ae', wordWrap: { width: 124 } });
 
     this.bars = this.add.graphics();
@@ -64,7 +68,7 @@ export class GarageScene extends Phaser.Scene {
 
     this.action = this.add.text(226, 146, '', { ...mono, fontSize: '10px' }).setOrigin(0.5, 0)
       .setInteractive({ useHandCursor: true }).on('pointerdown', () => this.activate());
-    this.toast = this.add.text(GAME_WIDTH / 2, GAME_HEIGHT - 20, '', { ...mono, color: '#e63946' }).setOrigin(0.5);
+    this.toast = this.add.text(GAME_WIDTH - 4, GAME_HEIGHT - 18, '', { ...mono, color: '#e63946' }).setOrigin(1, 0.5);
 
     this.add.text(GAME_WIDTH - 4, GAME_HEIGHT - 8, 'ENTER buy/equip   1-3 upgrade', { ...mono, color: '#8d99ae' }).setOrigin(1, 0.5);
     this.add.text(4, GAME_HEIGHT - 8, '< BACK', { ...mono, color: '#ffd166' }).setOrigin(0, 0.5)
@@ -142,6 +146,9 @@ export class GarageScene extends Phaser.Scene {
     this.preview.setTexture(`car-${car.id}`);
     this.title.setText(car.name);
     this.blurb.setText(car.blurb);
+    const cls = CAR_CLASSES[car.carClass];
+    this.classTag.setText(cls.label).setColor(cls.color);
+    this.classBlurb.setText(cls.blurb).setColor(cls.color);
 
     this.bars.clear();
     const base = statBars(car.stats);

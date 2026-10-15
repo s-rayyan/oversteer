@@ -28,4 +28,4 @@ whatever they typed (12 chars). Rules only allow a player to write their own doc
 **Caveat:** scores are submitted by the client, so a determined player can post a fake time within the allowed range.
 The rules bound the values but cannot verify a run; real anti-cheat needs server-side replay validation.
 
-Tools: `npm run check:tracks` validates track layouts; `npm run test:road` stress-tests the endless-road generator (add `--legacy` to see the old, broken one fail).
+Tools: `npm run check:tracks` validates track layouts; `npm run check:cars` verifies car classes; `npm run check:trackclasses` checks each track's recommended car class against the lap benchmark (`scripts/benchmarkLaps.js` regenerates it); `npm run test:road` stress-tests the endless-road generator (add `--legacy` to see the old, broken one fail).

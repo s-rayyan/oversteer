@@ -9,7 +9,9 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "check:tracks": "node scripts/checkTracks.ts",
-    "test:road": "node scripts/testEndlessRoad.ts"
+    "test:road": "node scripts/testEndlessRoad.ts",
+    "check:cars": "node scripts/checkCars.ts",
+    "check:trackclasses": "node scripts/checkTrackClasses.ts"
   },
   "dependencies": {
     "firebase": "^12.19.0",

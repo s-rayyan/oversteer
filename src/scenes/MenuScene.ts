@@ -7,6 +7,7 @@ import { getName, setName } from '../game/player';
 import { BOARD_ENDLESS, BOARD_OVERSTEER } from '../net/leaderboard';
 import { formatTime, getEndlessBest, getRecord } from '../game/records';
 import { sampleClosedSpline } from '../game/spline';
+import { TRACK_CLASSES, classifyTrack, type TrackClassId } from '../game/trackClass';
 import { DIFFICULTY_COLOR, GROUPS, TRACKS } from '../game/tracks';
 
 const ENDLESS_TAB = GROUPS.length;
@@ -15,6 +16,7 @@ const TAB_COUNT = GROUPS.length + 2;
 const TAB_W = GAME_WIDTH / TAB_COUNT;
 const PREVIEW = { x: 184, y: 62, w: 120, h: 74 };
 
+const classCache = new Map<string, TrackClassId>();
 let lastTab = 0;
 let lastTrack = 0;
 
@@ -28,6 +30,7 @@ export class MenuScene extends Phaser.Scene {
   private preview!: Phaser.GameObjects.Graphics;
   private previewText!: Phaser.GameObjects.Text;
   private info!: Phaser.GameObjects.Text;
+  private classInfo!: Phaser.GameObjects.Text;
   private driver!: Phaser.GameObjects.Text;
 
   constructor() {
@@ -80,6 +83,7 @@ export class MenuScene extends Phaser.Scene {
     this.previewText = this.add.text(PREVIEW.x + PREVIEW.w / 2, PREVIEW.y + PREVIEW.h / 2, '', { ...mono, fontSize: '8px', align: 'center', color: '#c9d1e3' }).setOrigin(0.5);
     this.info = this.add.text(PREVIEW.x, PREVIEW.y + PREVIEW.h + 5, '', { ...mono, fontSize: '8px', color: '#c9d1e3' });
 
+    this.classInfo = this.add.text(PREVIEW.x, PREVIEW.y + PREVIEW.h + 15, '', { ...mono, fontSize: '7px' });
     this.add
       .text(GAME_WIDTH / 2, GAME_HEIGHT - 17, 'LEFT/RIGHT group   UP/DOWN track   ENTER start', { ...mono, fontSize: '8px', color: '#8d99ae' })
       .setOrigin(0.5);
@@ -166,6 +170,7 @@ export class MenuScene extends Phaser.Scene {
     });
 
     this.preview.clear();
+    this.classInfo.setText('');
     if (this.tab >= ENDLESS_TAB) {
       const wild = this.tab === OVERSTEER_TAB;
       this.previewText.setText(wild
@@ -188,6 +193,14 @@ export class MenuScene extends Phaser.Scene {
     this.preview.lineStyle(3, 0x3d405b).strokePoints(mapped, true);
     this.preview.lineStyle(1, Phaser.Display.Color.HexStringToColor(DIFFICULTY_COLOR[t.difficulty]).color).strokePoints(mapped, true);
     this.preview.fillStyle(0xffffff).fillRect(Math.floor(mapped[0].x) - 1, Math.floor(mapped[0].y) - 1, 3, 3);
+
+    let cid = classCache.get(t.id);
+    if (!cid) classCache.set(t.id, (cid = classifyTrack(t)));
+    const tc = TRACK_CLASSES[cid];
+    // Speedsters are the default pick almost everywhere, so only say something when they are NOT recommended.
+    this.classInfo
+      .setText(tc.bestCar === 'speedster' ? tc.label : `${tc.label}: no speedsters!`)
+      .setColor(tc.color);
 
     const rec = getRecord(t.id);
     this.info.setText(`${t.laps} LAPS   BEST ${rec.best !== undefined ? formatTime(rec.best) : '--:--.---'}`);
