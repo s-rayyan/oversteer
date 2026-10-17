@@ -1,17 +1,12 @@
 // Moving players off the embedded (iframe) copy of the game.
 //
 // Browsers partition storage by the top-level site, so the game inside the game hub's iframe has its own
-// localStorage, separate from the game opened directly. Both copies are the same origin, though, so the
-// embedded copy can open the game in a new tab and hand its save over with postMessage. Nothing goes
-// through a server. The new tab merges it with whatever it already has (see saveMerge.ts).
-//
-// If the browser blocks the new tab from talking back, the launcher falls back to a link carrying the save
-// (without ghosts, to keep it short) in the URL #fragment, which never leaves the browser.
-import { IMPORTED_KEY, LB_SYNCED_KEY, MIGRATED_KEY, SAVE_PREFIX, TRANSFER_ID_KEY, describeSave, hasProgress, mergeSaves, type SaveData } from './saveMerge';
-
-const MSG_READY = 'oversteer-ready';
-const MSG_SAVE = 'oversteer-save';
-const MSG_DONE = 'oversteer-imported';
+// localStorage, separate from the game opened directly. When the game finds itself embedded it packs its
+// save into a link's #fragment (which never leaves the browser) and immediately sends the whole page to
+// the standalone game, which merges the save in before starting (see saveMerge.ts). If the browser
+// blocks that automatic redirect, one click on PLAY does it; if even that is blocked, a new tab or a
+// copyable link carries the save instead.
+import { IMPORTED_KEY, LB_SYNCED_KEY, MIGRATED_KEY, SAVE_PREFIX, TRANSFER_ID_KEY, hasProgress, mergeSaves, type SaveData } from './saveMerge';
 
 /** True when the game is running inside an iframe (e.g. the game hub). */
 export function isEmbedded(): boolean {
@@ -96,51 +91,49 @@ function cleanUrl(): void {
   history.replaceState(null, '', location.pathname);
 }
 
-/**
- * Call before the game starts. Applies a save handed over by the embedded copy, either through
- * postMessage (`?import=1`, opened by the launcher) or the fallback `#save=` link.
- */
+/** Call before the game starts: applies a save carried in a `#save=` link from the embedded copy. */
 export async function receiveSave(): Promise<void> {
-  if (location.hash.startsWith('#save=')) {
-    try {
-      const { id, data } = await decode(location.hash.slice('#save='.length));
-      writeSave(mergeSaves(readSave(), data, id));
-    } catch {
-      /* bad link: ignore */
-    }
-    cleanUrl();
+  if (!location.hash.startsWith('#save=')) return;
+  try {
+    const { id, data } = await decode(location.hash.slice('#save='.length));
+    writeSave(mergeSaves(readSave(), data, id));
+  } catch {
+    /* bad link: ignore */
   }
-
-  if (!new URLSearchParams(location.search).has('import')) return;
-  const opener = window.opener as Window | null;
-  if (!opener) {
-    cleanUrl();
-    return;
-  }
-  await new Promise<void>((resolve) => {
-    const finish = () => {
-      clearTimeout(timer);
-      window.removeEventListener('message', onMessage);
-      cleanUrl();
-      resolve();
-    };
-    const timer = setTimeout(finish, 8000);
-    const onMessage = (e: MessageEvent) => {
-      if (e.origin !== location.origin || e.source !== opener || e.data?.type !== MSG_SAVE) return;
-      writeSave(mergeSaves(readSave(), e.data.data as SaveData, String(e.data.id)));
-      opener.postMessage({ type: MSG_DONE, id: e.data.id }, location.origin);
-      finish();
-    };
-    window.addEventListener('message', onMessage);
-    try {
-      opener.postMessage({ type: MSG_READY }, location.origin);
-    } catch {
-      finish();
-    }
-  });
+  cleanUrl();
 }
 
 // ---------- sending side (the embedded copy) ----------
+
+/** Longest link we build; ghosts are added (fastest first) only while the link stays under this. */
+const MAX_LINK = 60_000;
+
+/** Link to the standalone game carrying this save (all of it if it fits; otherwise without some ghosts). */
+async function saveLink(): Promise<string> {
+  const save = exportable();
+  if (!hasProgress(save)) return location.origin + '/';
+  const id = transferId();
+  const base: SaveData = Object.fromEntries(Object.entries(save).filter(([k]) => !k.startsWith('oversteer.ghost.')));
+  const ghosts = Object.entries(save).filter(([k]) => k.startsWith('oversteer.ghost.'));
+  let link = `${location.origin}/#save=${await encode({ id, data: base })}`;
+  for (const [k, v] of ghosts) {
+    const next = `${location.origin}/#save=${await encode({ id, data: { ...base, [k]: v } })}`;
+    if (next.length > MAX_LINK) continue;
+    base[k] = v;
+    link = next;
+  }
+  return link;
+}
+
+/** Sends the whole browser tab to `url`. Returns false if the browser refused (no click yet, or a sandbox). */
+function redirectTop(url: string): boolean {
+  try {
+    (window.top ?? window).location.href = url;
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 const css = {
   wrap: 'position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:#14121f;font-family:monospace;color:#fff;padding:16px;box-sizing:border-box',
@@ -153,99 +146,56 @@ const css = {
 };
 
 /**
- * Shown instead of the game when it is embedded. Moves the save into the standalone copy and opens it.
- * `playHere` starts the game in the iframe anyway.
+ * Called instead of starting the game when it is embedded: takes the player (and their save) to the
+ * standalone game. `playHere` starts the game in the iframe anyway, offered only if nothing else works.
  */
 export function showLauncher(playHere: () => void): void {
   const root = document.createElement('div');
   root.style.cssText = css.wrap;
   document.body.appendChild(root);
-
   const render = (html: string) => {
-    root.innerHTML = `<div style="${css.card}"><div style="${css.title}">OVERSTEER</div>${html}
-      <button data-here style="${css.small}">play here instead (progress here won't carry over)</button></div>`;
-    root.querySelector('[data-here]')!.addEventListener('click', () => {
-      root.remove();
-      playHere();
-    });
+    root.innerHTML = `<div style="${css.card}"><div style="${css.title}">OVERSTEER</div>${html}</div>`;
   };
+  render(`<p style="${css.text}">Opening Oversteer...</p>`);
 
-  const save = exportable();
-  const movedAt = (() => {
-    try {
-      return Number(localStorage.getItem(MIGRATED_KEY)) || 0;
-    } catch {
-      return 0;
-    }
-  })();
-
-  const showOpen = (message: string) => {
-    render(`<p style="${css.text}">${message}</p><button data-open style="${css.button}">OPEN OVERSTEER</button>`);
-    root.querySelector('[data-open]')!.addEventListener('click', () => window.open(location.origin + '/', '_blank'));
-  };
-
-  if (!hasProgress(save)) {
-    showOpen('Oversteer now runs in its own tab.');
-    return;
-  }
-  if (movedAt) {
-    // Already synced: no screen, just send the player to the standalone game.
-    try {
-      (window.top ?? window).location.href = location.origin + '/';
-    } catch {
-      // Top navigation blocked (sandboxed or cross-origin parent): fall back to the open button.
-      showOpen('Oversteer now runs in its own tab.');
-    }
-    return;
-  }
-
-  render(`<p style="${css.text}">Oversteer now runs in its own tab. Your save is stored here:<br><b style="color:#fff">${describeSave(save) || 'your progress'}</b>.<br>Move it over so you don't lose anything.</p>
-    <button data-move style="${css.button}">MOVE MY SAVE &amp; PLAY</button>`);
-  root.querySelector('[data-move]')!.addEventListener('click', () => {
-    const id = transferId();
-    const tab = window.open(location.origin + '/?import=1', '_blank');
-    let answered = false;
-
-    const onMessage = (e: MessageEvent) => {
-      if (e.origin !== location.origin || !tab || e.source !== tab) return;
-      if (e.data?.type === MSG_READY) {
-        answered = true;
-        tab.postMessage({ type: MSG_SAVE, id, data: save }, location.origin);
-      } else if (e.data?.type === MSG_DONE && e.data.id === id) {
-        window.removeEventListener('message', onMessage);
-        try {
-          localStorage.setItem(MIGRATED_KEY, String(Date.now()));
-        } catch {
-          /* storage unavailable */
-        }
-        showOpen('Done! Your save is in the new tab. Play there from now on.');
-      }
-    };
-    window.addEventListener('message', onMessage);
-    render(`<p style="${css.text}">Moving your save to the new tab...</p>`);
+  void saveLink().then((link) => {
+    // Try straight away. Most browsers only allow an embedded page to move the whole tab after a click,
+    // so if we're still here a moment later, ask for one.
+    redirectTop(link);
     setTimeout(() => {
-      if (!answered) void showFallback(id, save);
-    }, tab ? 8000 : 0);
+      render(`<p style="${css.text}">Oversteer now runs in its own page. Your save comes with you.</p><button data-play style="${css.button}">PLAY OVERSTEER</button>`);
+      root.querySelector('[data-play]')!.addEventListener('click', () => {
+        if (redirectTop(link)) return;
+        if (window.open(link, '_blank')) {
+          render(`<p style="${css.text}">Oversteer opened in a new tab. Play there from now on.</p>`);
+          return;
+        }
+        showCopyLink(link);
+      });
+    }, 1500);
   });
 
-  /** The new tab was blocked or never answered: give the player a link that carries the save instead. */
-  async function showFallback(id: string, data: SaveData): Promise<void> {
-    const small: SaveData = Object.fromEntries(Object.entries(data).filter(([k]) => !k.startsWith('oversteer.ghost.')));
-    const url = `${location.origin}/#save=${await encode({ id, data: small })}`;
-    render(`<p style="${css.text}">Your browser didn't let the new tab open. Open this link in a new tab to move your save (coins, cars, records):</p>
-      <textarea readonly rows="4" style="${css.field}">${url}</textarea>
-      <button data-copy style="${css.button}">COPY LINK</button>`);
+  /** Nothing can leave the iframe: let the player carry the link over by hand. */
+  function showCopyLink(link: string): void {
+    render(`<p style="${css.text}">Your browser blocked opening Oversteer from here. Open this link in a new tab; it carries your save:</p>
+      <textarea readonly rows="4" style="${css.field}">${link}</textarea>
+      <button data-copy style="${css.button}">COPY LINK</button>
+      <button data-here style="${css.small}">play here instead (progress here won't carry over)</button>`);
     const field = root.querySelector('textarea')!;
     field.addEventListener('focus', () => field.select());
     root.querySelector('[data-copy]')!.addEventListener('click', async (e) => {
       const btn = e.currentTarget as HTMLButtonElement;
       try {
-        await navigator.clipboard.writeText(url);
+        await navigator.clipboard.writeText(link);
         btn.textContent = 'COPIED! PASTE IT INTO A NEW TAB';
       } catch {
         field.focus();
         btn.textContent = 'SELECTED: PRESS CTRL/CMD+C';
       }
+    });
+    root.querySelector('[data-here]')!.addEventListener('click', () => {
+      root.remove();
+      playHere();
     });
   }
 }

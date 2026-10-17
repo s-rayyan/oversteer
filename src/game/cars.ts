@@ -39,12 +39,12 @@ export const CAR_CLASSES: Record<CarClassId, CarClass> = {
   speedster: {
     id: 'speedster', label: 'SPEEDSTER', color: '#ffd166',
     blurb: 'Top speed and acceleration, poor turning.',
-    matches: (s) => s.maxSpeed >= 140 && s.turnRate <= 1.7,
+    matches: (s) => s.maxSpeed >= 140 && s.turnRate <= 2.0 && s.grip <= 2.3,
   },
   gripracer: {
     id: 'gripracer', label: 'GRIP RACER', color: '#4895ef',
     blurb: 'Huge grip. Wins on technical tracks.',
-    matches: (s) => s.grip >= 3.5 && s.turnRate < 3.0 && s.boostCharge <= 0.7 && s.offRoadCap < 0.8 && s.maxSpeed < 155,
+    matches: (s) => s.grip >= 3.5 && s.turnRate < 3.0 && s.boostCharge <= 0.7 && s.offRoadCap < 0.8 && s.maxSpeed < 160,
   },
   drifter: {
     id: 'drifter', label: 'DRIFTER', color: '#f4a261',
@@ -64,12 +64,12 @@ export const CAR_CLASSES: Record<CarClassId, CarClass> = {
   agile: {
     id: 'agile', label: 'AGILE', color: '#c77dff',
     blurb: 'Tiny and twitchy. Wins on hairpins.',
-    matches: (s) => s.turnRate >= 3.0 && s.maxSpeed <= 120,
+    matches: (s) => s.turnRate >= 3.0 && s.maxSpeed <= 130,
   },
   hypercar: {
     id: 'hypercar', label: 'HYPERCAR', color: '#00b4d8',
     blurb: 'Premium all-rounder. Specialists can beat it.',
-    matches: (s) => s.maxSpeed >= 145 && s.grip >= 2.0 && s.grip <= 3.2 && s.padGain <= 0.3,
+    matches: (s) => s.maxSpeed >= 145 && s.grip >= 2.4 && s.grip < 3.5 && s.offRoadCap < 0.8 && s.boostSpeed < 1.5,
   },
 };
 
@@ -107,11 +107,11 @@ const CAR_LIST: CarDef[] = [
   },
   {
     id: 'dragster', name: 'Dragster', blurb: 'Rocket on the straights. Turning is a suggestion.', price: 1200, carClass: 'speedster', color: 0xffd166,
-    stats: { ...BASE, maxSpeed: 164, accel: 152, brake: 130, turnRate: 1.58, grip: 1.69, boostSpeed: 1.05, offRoadCap: 0.3, padGain: 0.49 },
+    stats: { ...BASE, maxSpeed: 164, accel: 152, brake: 130, turnRate: 1.9, grip: 2.0 },
   },
   {
     id: 'bruiser', name: 'Bruiser', blurb: 'Huge boost tank and a bigger kick.', price: 1500, carClass: 'booster', color: 0x8d99ae,
-    stats: { ...BASE, maxSpeed: 124, accel: 123, boostCharge: 0.6, boostDrain: 0.3, boostSpeed: 1.52, padGain: 0.6 },
+    stats: { ...BASE, maxSpeed: 148, accel: 130, boostCharge: 0.6, boostDrain: 0.3, boostSpeed: 1.97, padGain: 0.6 },
   },
   // ---- more cars, roughly cheapest to priciest ----
   {
@@ -132,19 +132,19 @@ const CAR_LIST: CarDef[] = [
   },
   {
     id: 'muscle', name: 'Muscle', blurb: 'Loud, heavy and always sideways.', price: 1000, carClass: 'speedster', color: 0x9d0208, size: [18, 10], stripe: 0xf1faee,
-    stats: { ...BASE, maxSpeed: 153, accel: 141, brake: 140, turnRate: 1.67, grip: 1.6, boostCharge: 0.4, boostSpeed: 1.05, offRoadCap: 0.3, padGain: 0.49 },
+    stats: { ...BASE, maxSpeed: 153, accel: 141, brake: 140, turnRate: 2.0, grip: 1.9, boostCharge: 0.4 },
   },
   {
     id: 'tank', name: 'Tank', blurb: 'Plows through grass and boosts for ages.', price: 2000, carClass: 'offroader', color: 0x4f772d, size: [18, 11], stripe: 0x90a955,
-    stats: { ...BASE, maxSpeed: 123, accel: 98, turnRate: 2, grip: 3.2, boostDrain: 0.25, boostSpeed: 1.3, offRoadCap: 0.95 },
+    stats: { ...BASE, maxSpeed: 146, accel: 113, turnRate: 2, grip: 3.2, boostDrain: 0.25, boostSpeed: 1.3, offRoadCap: 0.95 },
   },
   {
     id: 'rocket', name: 'Rocket', blurb: 'Absurd top speed. Steering optional.', price: 2500, carClass: 'speedster', color: 0xf1faee, size: [18, 8], stripe: 0xe63946,
-    stats: { ...BASE, maxSpeed: 175, accel: 163, turnRate: 1.5, grip: 1.85, boostCharge: 0.45, boostSpeed: 1.13, offRoadCap: 0.3, padGain: 0.49 },
+    stats: { ...BASE, maxSpeed: 175, accel: 163, turnRate: 1.8, grip: 2.2, boostSpeed: 1.35, boostCharge: 0.45 },
   },
   {
     id: 'phantom', name: 'Phantom', blurb: 'Precise and fast. Rewards clean drifts.', price: 3200, carClass: 'gripracer', color: 0x3a0ca3, size: [17, 9], stripe: 0xc77dff,
-    stats: { ...BASE, maxSpeed: 153, accel: 141, turnRate: 2.53, grip: 4.17, boostCharge: 0.66, boostDrain: 0.4 },
+    stats: { ...BASE, maxSpeed: 158, accel: 160, turnRate: 2.53, grip: 4.8, boostCharge: 0.66, boostDrain: 0.4 },
   },
   {
     id: 'comet', name: 'Comet', blurb: 'Almost the best car in the game.', price: 4200, carClass: 'hypercar', color: 0x00b4d8, size: [17, 9], stripe: 0xffffff,
@@ -152,7 +152,7 @@ const CAR_LIST: CarDef[] = [
   },
   {
     id: 'legend', name: 'Legend', blurb: 'The best car in the game. Gold paint included.', price: 6500, carClass: 'hypercar', color: 0xd4af37, size: [18, 9], stripe: 0x14121f,
-    stats: { ...BASE, maxSpeed: 162, accel: 142, turnRate: 1.94, grip: 2.69, boostCharge: 0.62, boostDrain: 0.43, boostSpeed: 1.19, offRoadCap: 0.45, padGain: 0.2 },
+    stats: { ...BASE, maxSpeed: 170, accel: 155, turnRate: 2.8, grip: 3.4, boostCharge: 1.0, boostDrain: 0.3, boostSpeed: 1.4, offRoadCap: 0.6 },
   },
 ];
 

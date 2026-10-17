@@ -8,6 +8,7 @@ import { BOARD_ENDLESS, BOARD_OVERSTEER } from '../net/leaderboard';
 import { formatTime, getEndlessBest, getRecord } from '../game/records';
 import { sampleClosedSpline } from '../game/spline';
 import { surfaceFlags } from '../game/surfaces';
+import { getCar } from '../game/cars';
 import { TRACK_BEST } from '../game/trackBest';
 import { TRACK_CLASSES, classifyTrack, type TrackClassId } from '../game/trackClass';
 import { DIFFICULTY_COLOR, GROUPS, TRACKS } from '../game/tracks';
@@ -33,6 +34,7 @@ export class MenuScene extends Phaser.Scene {
   private previewText!: Phaser.GameObjects.Text;
   private info!: Phaser.GameObjects.Text;
   private classInfo!: Phaser.GameObjects.Text;
+  private typeTag!: Phaser.GameObjects.Text;
   private driver!: Phaser.GameObjects.Text;
 
   constructor() {
@@ -85,7 +87,9 @@ export class MenuScene extends Phaser.Scene {
     this.previewText = this.add.text(PREVIEW.x + PREVIEW.w / 2, PREVIEW.y + PREVIEW.h / 2, '', { ...mono, fontSize: '8px', align: 'center', color: '#c9d1e3' }).setOrigin(0.5);
     this.info = this.add.text(PREVIEW.x, PREVIEW.y + PREVIEW.h + 5, '', { ...mono, fontSize: '8px', color: '#c9d1e3' });
 
-    this.classInfo = this.add.text(PREVIEW.x, PREVIEW.y + PREVIEW.h + 15, '', { ...mono, fontSize: '7px' });
+    this.classInfo = this.add.text(PREVIEW.x, PREVIEW.y + PREVIEW.h + 15, '', { ...mono, fontSize: '7px', color: '#ffd166' });
+    // track type, in the corner of the map preview
+    this.typeTag = this.add.text(PREVIEW.x + 3, PREVIEW.y + 2, '', { ...mono, fontSize: '7px' });
     this.add
       .text(GAME_WIDTH / 2, GAME_HEIGHT - 17, 'LEFT/RIGHT group   UP/DOWN track   ENTER start', { ...mono, fontSize: '8px', color: '#8d99ae' })
       .setOrigin(0.5);
@@ -173,6 +177,7 @@ export class MenuScene extends Phaser.Scene {
 
     this.preview.clear();
     this.classInfo.setText('');
+    this.typeTag.setText('');
     if (this.tab >= ENDLESS_TAB) {
       const wild = this.tab === OVERSTEER_TAB;
       this.previewText.setText(wild
@@ -212,10 +217,13 @@ export class MenuScene extends Phaser.Scene {
     let cid = classCache.get(t.id);
     if (!cid) classCache.set(t.id, (cid = classifyTrack(t)));
     const tc = TRACK_CLASSES[cid];
-    // Speedsters are the default pick almost everywhere, so only say something when they are NOT recommended.
-    this.classInfo
-      .setText(TRACK_BEST[t.id]?.bestRole === 'speedster' ? tc.label : `${tc.label}: no speedsters!`)
-      .setColor(tc.color);
+    this.typeTag.setText(tc.label).setColor(tc.color);
+    // fastest car here, and the fastest one you can buy for $1000 or less (from the benchmark)
+    const tb = TRACK_BEST[t.id];
+    if (tb) {
+      const carName = (id: string) => getCar(id).name.toUpperCase();
+      this.classInfo.setText(tb.cheapCar === tb.car ? `BEST: ${carName(tb.car)}` : `BEST: ${carName(tb.car)}   $1K: ${carName(tb.cheapCar)}`);
+    }
 
     const rec = getRecord(t.id);
     this.info.setText(`${t.laps} LAPS   BEST ${rec.best !== undefined ? formatTime(rec.best) : '--:--.---'}`);

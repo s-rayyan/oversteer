@@ -22,6 +22,7 @@ export class GarageScene extends Phaser.Scene {
   private blurb!: Phaser.GameObjects.Text;
   private classTag!: Phaser.GameObjects.Text;
   private classBlurb!: Phaser.GameObjects.Text;
+  private fastestText!: Phaser.GameObjects.Text;
   private bars!: Phaser.GameObjects.Graphics;
   private barLabels: Phaser.GameObjects.Text[] = [];
   private upRows: Phaser.GameObjects.Text[] = [];
@@ -57,6 +58,7 @@ export class GarageScene extends Phaser.Scene {
     this.title = this.add.text(190, 24, '', { ...mono, fontSize: '10px', color: '#ffd166' });
     this.classTag = this.add.text(GAME_WIDTH - 4, 26, '', mono).setOrigin(1, 0);
     this.classBlurb = this.add.text(10, 142, '', { ...mono, fontSize: '7px', wordWrap: { width: 126 } });
+    this.fastestText = this.add.text(233, 160, '', { ...mono, fontSize: '7px' }).setOrigin(0.5, 0);
     this.blurb = this.add.text(190, 36, '', { ...mono, color: '#8d99ae', wordWrap: { width: 124 } });
 
     this.bars = this.add.graphics();
@@ -150,9 +152,17 @@ export class GarageScene extends Phaser.Scene {
     this.blurb.setText(car.blurb);
     const cls = CAR_CLASSES[car.carClass];
     this.classTag.setText(cls.label).setColor(cls.color);
-    const wins = TRACKS.filter((t) => TRACK_BEST[t.id]?.best === car.carClass);
-    const fastest = wins.length === 0 ? '' : wins.length === 1 ? `Fastest on: ${wins[0].name}` : wins.length === 2 ? `Fastest on: ${wins[0].name}, ${wins[1].name}` : `Fastest on ${wins.length} tracks`;
-    this.classBlurb.setText(`${cls.blurb}\n${fastest}`).setColor(cls.color);
+    // this car's own wins (from the benchmark); cheaper cars that never win outright show their budget wins
+    // name the tracks if they fit on the line (about 41 characters), otherwise just count them
+    const line = (label: string, ts: typeof TRACKS) => {
+      const named = `${label} ${ts.map((t) => t.name).join(', ')}`;
+      return named.length <= 41 ? named : `${label} ${ts.length} tracks`;
+    };
+    const wins = TRACKS.filter((t) => TRACK_BEST[t.id]?.car === car.id);
+    const cheapWins = TRACKS.filter((t) => TRACK_BEST[t.id]?.cheapCar === car.id);
+    const fastest = wins.length ? line('Fastest on:', wins) : cheapWins.length ? line('$1K pick:', cheapWins) : '';
+    this.classBlurb.setText(cls.blurb).setColor(cls.color);
+    this.fastestText.setText(fastest).setColor(cls.color);
 
     this.bars.clear();
     const base = statBars(car.stats);
