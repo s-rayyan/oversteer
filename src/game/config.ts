@@ -4,6 +4,7 @@ export const GAME_HEIGHT = 180;
 
 export const SceneKey = {
   Boot: 'BootScene',
+  Title: 'TitleScene',
   Menu: 'MenuScene',
   Race: 'RaceScene',
   Endless: 'EndlessScene',

@@ -88,6 +88,6 @@ export class BootScene extends Phaser.Scene {
     rect(0xffffff, 0, 0, 2, 2); bake('smoke', 2, 2);
     g.destroy();
 
-    this.scene.start(SceneKey.Menu);
+    this.scene.start(SceneKey.Title);
   }
 }
