@@ -1,7 +1,11 @@
 import Phaser from 'phaser';
 import { RACE_PAY } from '../game/cars';
 import { GAME_WIDTH, SceneKey } from '../game/config';
-import { GHOST_DT, GHOST_STRIDE, loadGhost, q1, saveGhostIfBest, type GhostData } from '../game/ghost';
+import { GHOST_DT, getGhostMode, loadGhost, q1, saveGhostIfBest, type GhostMode } from '../game/ghost';
+import { GhostRunner } from '../game/GhostRunner';
+import { getName } from '../game/player';
+import { fetchTopGhost, syncGhost, uploadGhost, type OnlineGhost } from '../net/ghosts';
+import { firebaseConfigured } from '../net/firebase';
 import { selectedCar } from '../game/profile';
 import { surfaceFlags, type SurfaceFlags } from '../game/surfaces';
 import { formatClock, formatTime, getRecord, submitRace } from '../game/records';
@@ -11,6 +15,10 @@ import { TRACKS, type TrackDef } from '../game/tracks';
 import { DriveScene, type Spawn } from './DriveScene';
 
 const WINDOW = 40; // samples searched either side of the last known position
+
+const MINE_TINT = 0xbfe9ff;
+const TOP_TINT = 0xffd166;
+const shortName = (n: string) => n.slice(0, 8).toUpperCase();
 
 /** Circuit race: N laps, lap timing, personal bests. */
 export class RaceScene extends DriveScene {
@@ -25,14 +33,17 @@ export class RaceScene extends DriveScene {
   private bestLap = Infinity;
   private finishPayout = 0;
 
-  // Ghost: replay of your best run, plus a recording of this one.
-  private ghost: GhostData | null = null;
-  private ghostSprite: Phaser.GameObjects.Image | null = null;
-  private ghostOn = true;
-  private ghostIdx = 0;
+  // Ghosts: your best run, and the fastest uploaded run; plus a recording of this one.
+  private mine: GhostRunner | null = null;
+  private top: GhostRunner | null = null;
+  private topInfo: OnlineGhost | null = null;
+  private topStatus: 'loading' | 'ready' | 'none' | 'offline' = 'loading';
+  private ghostMode: GhostMode = 'mine';
+  private runToken = 0; // lets a late network reply tell it belongs to a scene that has since restarted
   private rec: number[] = [];
   private nextRec = 0;
-  private deltaText!: Phaser.GameObjects.Text;
+  private deltaMine!: Phaser.GameObjects.Text;
+  private deltaTop!: Phaser.GameObjects.Text;
 
   constructor() {
     super(SceneKey.Race);
@@ -61,20 +72,28 @@ export class RaceScene extends DriveScene {
 
     this.rec = [];
     this.nextRec = 0;
-    this.ghostIdx = 0;
-    this.ghostOn = true;
-    this.ghost = loadGhost(this.track.id);
-    this.ghostSprite = this.ghost
-      ? this.add.image(0, 0, `car-${this.ghost.carId}`).setAlpha(0.5).setTint(0xbfe9ff).setDepth(9.5)
-      : null;
-    this.deltaText = this.add.text(GAME_WIDTH / 2, 15, '', {
-      fontFamily: 'monospace', fontSize: '8px', color: '#ffffff', stroke: '#14121f', strokeThickness: 2,
-    }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(100);
-    this.input.keyboard!.on('keydown-G', () => {
-      if (!this.ghost) return;
-      this.ghostOn = !this.ghostOn;
-      this.showFlash(this.ghostOn ? 'GHOST ON' : 'GHOST OFF', 700);
-    });
+    const board = this.track.id;
+    const token = ++this.runToken;
+    const local = loadGhost(board);
+    this.mine = local ? new GhostRunner(this, local, MINE_TINT) : null;
+    this.top = null;
+    this.topInfo = null;
+    this.ghostMode = getGhostMode();
+    this.topStatus = firebaseConfigured ? 'loading' : 'offline';
+    if (firebaseConfigured) {
+      void fetchTopGhost(board).then((t) => {
+        if (token !== this.runToken || !this.scene.isActive()) return;
+        if (!t) { this.topStatus = 'none'; if (this.ghostMode === 'top') this.showFlash('NO ONLINE GHOST YET - RACING YOUR BEST', 2200); return; }
+        this.topInfo = t;
+        this.top = new GhostRunner(this, t.ghost, TOP_TINT);
+        this.topStatus = 'ready';
+        if (this.ghostMode !== 'mine' && this.ghostMode !== 'off') this.showFlash(`RACING ${shortName(t.name)}  ${formatTime(t.ghost.time)}`, 2200);
+      });
+      if (local) void syncGhost(board, getName(), local); // make sure the player's own best run is online too
+    }
+    const label = { fontFamily: 'monospace', fontSize: '8px', color: '#ffffff', stroke: '#14121f', strokeThickness: 2 };
+    this.deltaMine = this.add.text(GAME_WIDTH / 2, 15, '', label).setOrigin(0.5, 0).setScrollFactor(0).setDepth(100);
+    this.deltaTop = this.add.text(GAME_WIDTH / 2, 25, '', label).setOrigin(0.5, 0).setScrollFactor(0).setDepth(100);
     return this.pointAt(this.idx);
   }
 
@@ -128,37 +147,18 @@ export class RaceScene extends DriveScene {
   }
 
   private updateGhost(): void {
-    const g = this.ghost;
-    const sprite = this.ghostSprite;
-    if (!g || !sprite) return;
-    const n = g.frames.length / GHOST_STRIDE;
-    const f = Math.max(0, this.raceTime) / GHOST_DT;
-    const i = Math.min(Math.floor(f), n - 1);
-    const j = Math.min(i + 1, n - 1);
-    const k = Math.min(f - i, 1);
-    const a = i * GHOST_STRIDE;
-    const b = j * GHOST_STRIDE;
-    const fr = g.frames;
-    sprite.setPosition(fr[a] + (fr[b] - fr[a]) * k, fr[a + 1] + (fr[b + 1] - fr[a + 1]) * k);
-    sprite.setRotation(fr[a + 2] + Phaser.Math.Angle.Wrap(fr[b + 2] - fr[a + 2]) * k);
-    sprite.setVisible(this.ghostOn && f < n + 20); // lingers a second at the finish, then vanishes
-
-    // Time delta: how long the ghost took to reach the point you're at now.
-    if (this.state !== 'racing' || !this.ghostOn) {
-      this.deltaText.setText('');
-      return;
-    }
-    while (this.ghostIdx < n - 1 && fr[this.ghostIdx * GHOST_STRIDE + 3] < this.maxTotal) this.ghostIdx++;
-    const hi = this.ghostIdx;
-    if (hi === 0 || fr[hi * GHOST_STRIDE + 3] < this.maxTotal) {
-      this.deltaText.setText('');
-      return;
-    }
-    const p0 = fr[(hi - 1) * GHOST_STRIDE + 3];
-    const p1 = fr[hi * GHOST_STRIDE + 3];
-    const ghostTime = (hi - 1 + (p1 === p0 ? 0 : (this.maxTotal - p0) / (p1 - p0))) * GHOST_DT;
-    const d = this.raceTime - ghostTime;
-    this.deltaText.setText(`${d > 0 ? '+' : '-'}${Math.abs(d).toFixed(2)}`).setColor(d > 0 ? '#e63946' : '#52b788');
+    const racing = this.state === 'racing';
+    const mode = this.ghostMode;
+    // "Top player" with no online ghost available falls back to your own best run.
+    const topGone = !this.top && this.topStatus !== 'loading';
+    const showMine = mode === 'mine' || mode === 'both' || (mode === 'top' && topGone);
+    const showTop = mode === 'top' || mode === 'both';
+    const show = (text: Phaser.GameObjects.Text, label: string, d: number | null) => {
+      if (d === null) text.setText('');
+      else text.setText(`${label} ${d > 0 ? '+' : '-'}${Math.abs(d).toFixed(2)}`).setColor(d > 0 ? '#e63946' : '#52b788');
+    };
+    show(this.deltaMine, 'BEST', this.mine?.update(this.raceTime, this.maxTotal, showMine, racing) ?? null);
+    show(this.deltaTop, 'TOP', this.top?.update(this.raceTime, this.maxTotal, showTop, racing) ?? null);
   }
 
   /** Called when the car crosses the line for the k-th time (k=0: start of lap 1). */
@@ -194,7 +194,8 @@ export class RaceScene extends DriveScene {
       lines.push('Ghost saved');
     }
     this.finish('FINISHED', lines);
-    void this.submitOnline(Math.round(this.raceTime * 1000));
+    const run = { time: this.raceTime, carId: selectedCar().id, frames: this.rec };
+    void this.submitOnline(Math.round(this.raceTime * 1000), async () => ((await uploadGhost(this.track.id, getName(), run)) ? 'Ghost uploaded' : undefined));
   }
 
   private lapNumber(): number {
@@ -211,13 +212,27 @@ export class RaceScene extends DriveScene {
     return this.samples;
   }
 
+  /** One or two short lines on who you're racing, only for ghosts that are switched on. */
+  private ghostLines(): string[] {
+    const m = this.ghostMode;
+    if (m === 'off') return [];
+    const out: string[] = [];
+    if ((m === 'mine' || m === 'both') && this.mine) out.push(`vs MY BEST  ${formatTime(this.mine.data.time)}`);
+    if (m === 'top' || m === 'both') {
+      out.push(this.topStatus === 'ready' && this.topInfo
+        ? `vs ${shortName(this.topInfo.name)}  ${formatTime(this.topInfo.ghost.time)}`
+        : this.topStatus === 'loading' ? 'vs TOP: loading...' : 'vs TOP: none yet');
+    }
+    return out;
+  }
+
   protected pauseInfo(): { title: string; lines: string[] } {
     return {
       title: 'PAUSED',
       lines: [
         this.track.name,
         `Lap ${this.lapNumber()}/${this.track.laps}   ${formatTime(this.raceTime)}`,
-        ...(this.ghost ? [`G ghost ${this.ghostOn ? 'on' : 'off'}  (best ${formatTime(this.ghost.time)})`] : []),
+        ...this.ghostLines(),
       ],
     };
   }

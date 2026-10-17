@@ -27,7 +27,7 @@ export class Overlay {
     this.sel = selected;
 
     const s = this.scene;
-    const w = 200;
+    const w = 220;
     const h = 34 + lines.length * 10 + (lines.length ? 8 : 0) + entries.length * 16 + 6;
     const cx = GAME_WIDTH / 2;
     const top = Math.round((GAME_HEIGHT - h) / 2);

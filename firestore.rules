@@ -31,5 +31,27 @@ service cloud.firestore {
           : request.resource.data.value <= resource.data.value;
       }
     }
+
+    // Replays of race runs: boards/{track id}/ghosts/{auth uid}. A replay is only accepted if its time equals
+    // the player's leaderboard score for that track, so nobody can attach a faster-looking run than they set.
+    match /boards/{board}/ghosts/{uid} {
+      allow read: if true;
+      allow create, update: if request.auth != null && request.auth.uid == uid
+        && board != 'endless' && board != 'oversteer'
+        && validGhost(board, uid);
+      allow delete: if false;
+
+      function validGhost(b, u) {
+        let d = request.resource.data;
+        let score = get(/databases/$(database)/documents/boards/$(b)/scores/$(u)).data;
+        return d.keys().hasOnly(['uid', 'name', 'time', 'carId', 'data', 'updatedAt'])
+          && d.uid == u
+          && d.name is string && d.name.size() >= 1 && d.name.size() <= 12
+          && d.time is int && d.time == score.value
+          && d.carId is string && d.carId.size() <= 24
+          && d.data is string && d.data.size() > 20 && d.data.size() <= 600000
+          && d.updatedAt == request.time;
+      }
+    }
   }
 }

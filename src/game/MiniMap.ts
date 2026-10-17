@@ -69,7 +69,7 @@ export class MiniMap {
     }
   }
 
-  update(carX: number, carY: number, nearby: Pt[]): void {
+  update(carX: number, carY: number, nearby: Pt[], markers: Pt[] = [], now = 0): void {
     this.dot.clear();
     let p: Pt;
     if (this.fit) {
@@ -89,6 +89,14 @@ export class MiniMap {
         if (run.length) runs.push(run);
         this.stroke(runs);
       }
+    }
+    // Police: flashing red/blue dots, pinned to the box edge when they're off the map so you still see where they are.
+    const flash = Math.floor(now / 160) % 2 ? 0xe63946 : 0x4895ef;
+    for (const m of markers) {
+      const q = this.fit ? this.toBox(m.x, m.y) : { x: p.x + (m.x - carX) * FOLLOW_SCALE, y: p.y + (m.y - carY) * FOLLOW_SCALE };
+      const x = Math.round(Math.min(Math.max(q.x, this.x + 2), this.x + BOX.w - 3));
+      const y = Math.round(Math.min(Math.max(q.y, this.y + 2), this.y + BOX.h - 3));
+      this.dot.fillStyle(0xffffff).fillRect(x - 2, y - 2, 5, 5).fillStyle(flash).fillRect(x - 1, y - 1, 3, 3);
     }
     this.dot.fillStyle(0xffd166).fillRect(p.x - 1, p.y - 1, 3, 3);
   }

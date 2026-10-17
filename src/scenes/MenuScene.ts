@@ -4,8 +4,9 @@ import { askName } from '../game/nameDialog';
 import { getCoins } from '../game/profile';
 import { CoinBadge } from '../game/ui';
 import { getName, setName } from '../game/player';
-import { BOARD_ENDLESS, BOARD_OVERSTEER } from '../net/leaderboard';
+import { BOARD_ENDLESS, BOARD_OVERSTEER, renameEverywhere } from '../net/leaderboard';
 import { formatTime, getEndlessBest, getRecord } from '../game/records';
+import { GHOST_MODES, GHOST_MODE_LABEL, getGhostMode, setGhostMode } from '../game/ghost';
 import { sampleClosedSpline } from '../game/spline';
 import { surfaceFlags } from '../game/surfaces';
 import { getCar } from '../game/cars';
@@ -36,6 +37,7 @@ export class MenuScene extends Phaser.Scene {
   private classInfo!: Phaser.GameObjects.Text;
   private typeTag!: Phaser.GameObjects.Text;
   private driver!: Phaser.GameObjects.Text;
+  private ghostChip!: Phaser.GameObjects.Text;
 
   constructor() {
     super(SceneKey.Menu);
@@ -82,6 +84,10 @@ export class MenuScene extends Phaser.Scene {
       this.rows.push({ name, diff });
     }
 
+    // Who you race against on circuits; click it (or press T) to change. Remembered between visits.
+    this.ghostChip = this.add.text(24, 152, '', { ...mono, fontSize: '8px', color: '#bfe9ff', backgroundColor: '#1d1b2e', padding: { x: 4, y: 3 } })
+      .setInteractive({ useHandCursor: true }).on('pointerdown', () => this.cycleGhost());
+
     this.add.rectangle(PREVIEW.x, PREVIEW.y, PREVIEW.w, PREVIEW.h, 0x1d1b2e).setOrigin(0).setStrokeStyle(1, 0x3d405b);
     this.preview = this.add.graphics();
     this.previewText = this.add.text(PREVIEW.x + PREVIEW.w / 2, PREVIEW.y + PREVIEW.h / 2, '', { ...mono, fontSize: '8px', align: 'center', color: '#c9d1e3' }).setOrigin(0.5);
@@ -91,10 +97,7 @@ export class MenuScene extends Phaser.Scene {
     // track type, in the corner of the map preview
     this.typeTag = this.add.text(PREVIEW.x + 3, PREVIEW.y + 2, '', { ...mono, fontSize: '7px' });
     this.add
-      .text(GAME_WIDTH / 2, GAME_HEIGHT - 17, 'LEFT/RIGHT group   UP/DOWN track   ENTER start', { ...mono, fontSize: '8px', color: '#8d99ae' })
-      .setOrigin(0.5);
-    this.add
-      .text(GAME_WIDTH / 2, GAME_HEIGHT - 7, 'L leaderboard   G garage   N name', { ...mono, fontSize: '8px', color: '#8d99ae' })
+      .text(GAME_WIDTH / 2, GAME_HEIGHT - 8, 'ARROWS select     ENTER start', { ...mono, fontSize: '8px', color: '#8d99ae' })
       .setOrigin(0.5);
 
     const kb = this.input.keyboard!;
@@ -110,10 +113,17 @@ export class MenuScene extends Phaser.Scene {
     kb.on('keydown-L', () => this.openBoard());
     kb.on('keydown-G', () => this.scene.start(SceneKey.Garage));
     kb.on('keydown-N', () => void this.changeName());
+    kb.on('keydown-T', () => this.cycleGhost());
     this.events.once('shutdown', () => kb.removeAllListeners());
 
     this.refresh();
     if (!getName()) void this.changeName(false);
+  }
+
+  private cycleGhost(): void {
+    if (this.tab >= ENDLESS_TAB) return;
+    setGhostMode(GHOST_MODES[(GHOST_MODES.indexOf(getGhostMode()) + 1) % GHOST_MODES.length]);
+    this.refresh();
   }
 
   private updateDriver(): void {
@@ -121,9 +131,11 @@ export class MenuScene extends Phaser.Scene {
   }
 
   private async changeName(cancellable = true): Promise<void> {
-    const name = await askName(getName(), cancellable);
+    const old = getName();
+    const name = await askName(old, cancellable);
     if (name === null) return;
     setName(name);
+    if (old && name !== old) void renameEverywhere(name); // carry the new name onto the leaderboards
     if (this.driver.active) this.updateDriver();
   }
 
@@ -175,6 +187,7 @@ export class MenuScene extends Phaser.Scene {
       r.diff.setText(t.difficulty.toUpperCase()).setColor(DIFFICULTY_COLOR[t.difficulty]);
     });
 
+    this.ghostChip.setText(`GHOST: ${GHOST_MODE_LABEL[getGhostMode()]}`).setVisible(this.tab < ENDLESS_TAB);
     this.preview.clear();
     this.classInfo.setText('');
     this.typeTag.setText('');

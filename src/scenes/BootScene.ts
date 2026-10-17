@@ -141,6 +141,15 @@ export class BootScene extends Phaser.Scene {
     rect(0xffffff, 1, 0, 3, 5); rect(0xffffff, 0, 1, 5, 3); bake('puff', 5, 5);
     rect(0xffffff, 0, 0, 2, 1); rect(0xffffff, 0, 1, 1, 1); bake('speck', 2, 2);
     rect(0xffffff, 1, 0, 1, 3); rect(0xffffff, 0, 1, 3, 1); bake('spark', 3, 3);
+    // Screen vignette: clear in the middle, dark at the corners.
+    const vig = this.textures.createCanvas('vignette', 320, 180)!;
+    const ctx = vig.getContext();
+    const grad = ctx.createRadialGradient(160, 90, 55, 160, 90, 200);
+    grad.addColorStop(0, 'rgba(10,8,20,0)');
+    grad.addColorStop(1, 'rgba(10,8,20,0.8)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, 320, 180);
+    vig.refresh();
     g.destroy();
 
     this.scene.start(SceneKey.Title);

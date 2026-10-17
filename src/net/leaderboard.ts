@@ -2,6 +2,7 @@ import { formatTime, getLocalBests } from '../game/records';
 import { getName } from '../game/player';
 import { LB_SYNCED_KEY } from '../game/saveMerge';
 import { firebaseConfigured, getFirebase } from './firebase';
+import { TRACKS } from '../game/tracks';
 
 export const BOARD_ENDLESS = 'endless';
 export const BOARD_OVERSTEER = 'oversteer';
@@ -68,6 +69,35 @@ export async function fetchTop(board: string, n = 10): Promise<{ rows: ScoreRow[
   return { rows, myUid: uid };
 }
 
+// ---------- renaming ----------
+// Scores and replays carry the name they were set under, so changing your name has to rewrite them too.
+
+const RENAME_KEY = 'oversteer.renamePending';
+
+/** Rewrites the player's name on every board they have a score (and replay) on. Remembers to retry if it fails. */
+export async function renameEverywhere(name: string): Promise<void> {
+  if (!firebaseConfigured || !name) return;
+  try { localStorage.setItem(RENAME_KEY, name); } catch { /* storage unavailable */ }
+  try {
+    const { db, uid, fs } = await getFirebase();
+    const boards = [...TRACKS.map((t) => t.id), BOARD_ENDLESS, BOARD_OVERSTEER];
+    for (const board of boards) {
+      const ref = fs.doc(db, 'boards', board, 'scores', uid);
+      const snap = await fs.getDoc(ref);
+      if (!snap.exists()) continue;
+      if (snap.data().name !== name) await fs.updateDoc(ref, { name, updatedAt: fs.serverTimestamp() });
+      if (board === BOARD_ENDLESS || board === BOARD_OVERSTEER) continue;
+      const gref = fs.doc(db, 'boards', board, 'ghosts', uid);
+      const g = await fs.getDoc(gref);
+      if (g.exists() && g.data().name !== name) await fs.updateDoc(gref, { name, updatedAt: fs.serverTimestamp() });
+    }
+    cache.clear();
+    try { localStorage.removeItem(RENAME_KEY); } catch { /* storage unavailable */ }
+  } catch {
+    /* offline or rules rejected: stays pending and is retried by syncLocalBests */
+  }
+}
+
 // ---------- offline catch-up ----------
 // Scores set without a connection (or when the submit failed) are only in the local records. Remember which
 // bests the leaderboard has confirmed, and post any local best that is better than that once we're online.
@@ -103,6 +133,12 @@ let syncing = false;
 /** Posts every local best the leaderboard hasn't confirmed yet. Safe to call often; failures just wait for next time. */
 export async function syncLocalBests(): Promise<void> {
   const name = getName();
+  try {
+    const pending = localStorage.getItem(RENAME_KEY);
+    if (pending && pending === name && !syncing) void renameEverywhere(name);
+  } catch {
+    /* storage unavailable */
+  }
   if (syncing || !firebaseConfigured || !name || (typeof navigator !== 'undefined' && navigator.onLine === false)) return;
   const done = readSynced().boards;
   const pending = getLocalBests().filter(({ board, value }) => {

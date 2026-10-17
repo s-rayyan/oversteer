@@ -11,7 +11,7 @@ import type { Pt } from '../game/spline';
 import { addCoins, equippedStats, selectedCar } from '../game/profile';
 import { Overlay } from '../game/ui';
 import { firebaseConfigured } from '../net/firebase';
-import { submitScore, formatScore } from '../net/leaderboard';
+import { submitScore, formatScore, type SubmitResult } from '../net/leaderboard';
 import { HeatMeter } from '../game/HeatMeter';
 
 type KeyName = 'up' | 'down' | 'left' | 'right' | 'w' | 'a' | 's' | 'd' | 'space' | 'shift' | 'x' | 'comma';
@@ -23,6 +23,9 @@ export interface Spawn {
   heading: number;
 }
 
+/** Furthest the speed zoom pulls out; scenes with a screen-sized background must cover GAME_WIDTH / MIN_ZOOM. */
+export const MIN_ZOOM = 0.86;
+const ZOOM_SPEED = 0.11; // zoom-out at top speed
 const SKID_CAP = 1200;
 const SKID_LIFE = 9000;
 const CAM_LOOKAHEAD = 0.3; // seconds of travel the camera leads by
@@ -59,6 +62,10 @@ export abstract class DriveScene extends Phaser.Scene {
   private skidDrawn = 0;
   private sparks!: Phaser.GameObjects.Particles.ParticleEmitter;
   private wasBoosting = false;
+  private uiCam!: Phaser.Cameras.Scene2D.Camera;
+  private pendingUi: Phaser.GameObjects.GameObject[] = [];
+  private vignette!: Phaser.GameObjects.Image;
+  private zoom = 1;
   private skidsDirty = false;
   private countdown = 3;
   private paused = false;
@@ -86,6 +93,10 @@ export abstract class DriveScene extends Phaser.Scene {
   /** Whole-track outline for the minimap, or null to follow the car (endless). */
   protected abstract mapStatic(): Pt[] | null;
   /** Road points near the car, for the following minimap. */
+  /** Extra minimap dots (police). */
+  protected mapMarkers(): Pt[] {
+    return [];
+  }
   protected mapNearby(): Pt[] {
     return [];
   }
@@ -123,6 +134,8 @@ export abstract class DriveScene extends Phaser.Scene {
       this.boost = 1;
     }
 
+    this.zoom = 1;
+    this.setupCameras();
     const spawn = this.setupWorld();
 
     this.skidGfx = this.add.graphics().setDepth(2);
@@ -187,7 +200,45 @@ export abstract class DriveScene extends Phaser.Scene {
       .on('pointerdown', () => this.togglePause());
 
     this.boostGfx = this.add.graphics().setScrollFactor(0).setDepth(100);
+    this.vignette = this.add.image(0, 0, 'vignette').setOrigin(0).setScrollFactor(0).setDepth(90);
     this.overlay = new Overlay(this);
+  }
+
+  /**
+   * The main camera shows the world (and zooms with speed). HUD objects (screen-fixed, depth >= 90) live on a
+   * second, un-zoomed camera, so zooming never scales or shifts them. Every new object starts out world-only
+   * and is moved over just before rendering once its scroll factor and depth are known.
+   */
+  private setupCameras(): void {
+    this.uiCam = this.cameras.add(0, 0, GAME_WIDTH, GAME_HEIGHT);
+    this.pendingUi = [];
+    type Obj = Phaser.GameObjects.GameObject & Phaser.GameObjects.Components.ScrollFactor & Phaser.GameObjects.Components.Depth;
+    const onAdd = (o: Phaser.GameObjects.GameObject) => { this.uiCam.ignore(o); this.pendingUi.push(o); };
+    const sort = () => {
+      for (const o of this.pendingUi as Obj[]) {
+        if (o.scene && o.scrollFactorX === 0 && o.depth >= 90) {
+          o.cameraFilter &= ~this.uiCam.id;
+          this.cameras.main.ignore(o);
+        }
+      }
+      this.pendingUi.length = 0;
+    };
+    this.events.on(Phaser.Scenes.Events.ADDED_TO_SCENE, onAdd);
+    this.events.on(Phaser.Scenes.Events.PRE_RENDER, sort);
+    this.events.once('shutdown', () => {
+      this.events.off(Phaser.Scenes.Events.ADDED_TO_SCENE, onAdd);
+      this.events.off(Phaser.Scenes.Events.PRE_RENDER, sort);
+    });
+  }
+
+  /** Zooms out and darkens the edges as the car speeds up. */
+  private updateSpeedFx(dt: number): void {
+    const st = this.car.stats;
+    const frac = Phaser.Math.Clamp(this.car.speed / (st.maxSpeed * st.boostSpeed), 0, 1);
+    const target = 1 - ZOOM_SPEED * frac;
+    this.zoom += (target - this.zoom) * (1 - Math.exp(-4 * dt));
+    this.cameras.main.setZoom(Phaser.Math.Clamp(this.zoom, MIN_ZOOM, 1));
+    this.vignette.setAlpha(0.45 + 0.35 * frac);
   }
 
   /** Banks the current drift chain and pays out everything earned so far; returns the coins just added. */
@@ -233,7 +284,7 @@ export abstract class DriveScene extends Phaser.Scene {
   }
 
   /** Posts a score to the global leaderboard (asking for a name first if needed) and reports the rank in the results panel. */
-  protected async submitOnline(value: number): Promise<void> {
+  protected async submitOnline(value: number, onImproved?: (r: SubmitResult) => Promise<string | void>): Promise<void> {
     if (!firebaseConfigured) return;
     const run = this.runId;
     const line = (text: string) => {
@@ -249,6 +300,14 @@ export abstract class DriveScene extends Phaser.Scene {
     try {
       const r = await submitScore(this.board(), name, value);
       line(r.improved ? `Global rank #${r.rank ?? '?'}` : `Your best: ${formatScore(this.board(), r.best)} (#${r.rank ?? '?'})`);
+      if (r.improved && onImproved) {
+        try {
+          const extra = await onImproved(r);
+          if (extra) line(extra);
+        } catch (e) {
+          console.error('[ghost upload]', e);
+        }
+      }
     } catch (e) {
       console.error('[leaderboard]', e);
       line('Leaderboard unavailable');
@@ -272,7 +331,7 @@ export abstract class DriveScene extends Phaser.Scene {
     }
     this.paused = true;
     const info = this.pauseInfo();
-    this.overlay.show(info.title, [...info.lines, 'SPACE/SHIFT boost  X/COMMA handbrake', 'R restart  ENTER respawn  K show keys'], [
+    this.overlay.show(info.title, [...info.lines, 'SPACE boost   X handbrake   ENTER respawn'], [
       { label: 'Resume', action: () => this.togglePause() },
       { label: this.restartLabel, action: () => this.restart() },
       { label: 'Change track', action: () => this.scene.start(SceneKey.Menu) },
@@ -317,6 +376,7 @@ export abstract class DriveScene extends Phaser.Scene {
     this.car.rough = !off && this.surface.rough;
     this.car.update(dt, throttle, steer, boosting, handbrake);
     this.updateCamera(dt);
+    this.updateSpeedFx(dt);
     if (boosting && !this.wasBoosting) {
       const p = this.car.point(-8, 0);
       this.sparks.emitParticleAt(p.x, p.y, 8); // kick of sparks as the boost lights
@@ -336,7 +396,7 @@ export abstract class DriveScene extends Phaser.Scene {
       const down = (Object.entries(this.keys) as Array<[string, Phaser.Input.Keyboard.Key]>).filter(([, key]) => key.isDown).map(([name]) => name.toUpperCase());
       this.keyDebug.setText(`KEYS: ${down.join(' ') || '-'}`);
     }
-    this.mini.update(this.car.x, this.car.y, this.mapNearby());
+    this.mini.update(this.car.x, this.car.y, this.mapNearby(), this.mapMarkers(), this.time.now);
     this.heatMeter.update(this.car.heat);
     this.afterUpdate(dt);
   }
@@ -417,6 +477,7 @@ export abstract class DriveScene extends Phaser.Scene {
     if (now && !this.wasPad && this.state === 'racing') {
       this.boost = Math.min(1, this.boost + this.stats.padGain);
       this.showFlash('BOOST PAD!', 600);
+      this.cameras.main.shake(160, 0.005);
     }
     this.wasPad = now;
   }
@@ -424,6 +485,7 @@ export abstract class DriveScene extends Phaser.Scene {
   private effects(off: boolean, dt: number): void {
     if (off) {
       if (this.car.speed > 25) {
+        if (this.car.speed > 60) this.cameras.main.shake(70, 0.0025); // rumble over the grass
         const p = this.car.point(-7, 0);
         this.dust.emitParticleAt(p.x, p.y, 1);
       }

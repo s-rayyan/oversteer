@@ -9,7 +9,7 @@ import { getName } from '../game/player';
 import { BOARD_ENDLESS, BOARD_OVERSTEER, submitScore } from '../net/leaderboard';
 import { firebaseConfigured } from '../net/firebase';
 import { CATCH_RADIUS, PoliceCar } from '../game/Police';
-import { DriveScene, type Spawn } from './DriveScene';
+import { DriveScene, MIN_ZOOM, type Spawn } from './DriveScene';
 
 const CHUNK = 48; // samples per rendered chunk
 const AHEAD = 520; // samples generated ahead of the car
@@ -42,6 +42,8 @@ export class EndlessScene extends DriveScene {
   private idx = 0;
   private maxIdx = 0;
   private ground!: Phaser.GameObjects.TileSprite;
+  private groundW = GAME_WIDTH;
+  private groundH = GAME_HEIGHT;
   private best = 0;
   private cops: PoliceCar[] = [];
 
@@ -68,7 +70,10 @@ export class EndlessScene extends DriveScene {
     this.best = getEndlessBest(this.mode);
     this.cops = [];
 
-    this.ground = this.add.tileSprite(0, 0, GAME_WIDTH, GAME_HEIGHT, `ground-${this.theme}`)
+    // Oversized so it still covers the screen when the speed zoom pulls the camera out.
+    this.groundW = Math.ceil(GAME_WIDTH / MIN_ZOOM) + 4;
+    this.groundH = Math.ceil(GAME_HEIGHT / MIN_ZOOM) + 4;
+    this.ground = this.add.tileSprite((GAME_WIDTH - this.groundW) / 2, (GAME_HEIGHT - this.groundH) / 2, this.groundW, this.groundH, `ground-${this.theme}`)
       .setOrigin(0).setScrollFactor(0).setDepth(0);
     this.ensure();
     this.events.once('shutdown', () => this.saveBest());
@@ -147,8 +152,8 @@ export class EndlessScene extends DriveScene {
 
   protected afterUpdate(dt: number): void {
     const cam = this.cameras.main;
-    this.ground.tilePositionX = Math.floor(cam.scrollX);
-    this.ground.tilePositionY = Math.floor(cam.scrollY);
+    this.ground.tilePositionX = Math.floor(cam.scrollX - (this.groundW - GAME_WIDTH) / 2);
+    this.ground.tilePositionY = Math.floor(cam.scrollY - (this.groundH - GAME_HEIGHT) / 2);
     this.updatePolice(dt);
   }
 
@@ -176,6 +181,7 @@ export class EndlessScene extends DriveScene {
 
   private bust(): void {
     const m = this.meters();
+    this.cameras.main.shake(400, 0.012);
     this.saveBest(); // the run still counts
     this.settle();
     this.finish('BUSTED!', ['The police caught you.', `Run ended at ${m} m`, `Best ${this.best} m   Coins +${this.coinsPaid}`]);
@@ -200,6 +206,10 @@ export class EndlessScene extends DriveScene {
 
   protected mapStatic(): null {
     return null;
+  }
+
+  protected mapMarkers(): Pt[] {
+    return this.cops.map((c) => ({ x: c.x, y: c.y }));
   }
 
   protected mapNearby(): Pt[] {
