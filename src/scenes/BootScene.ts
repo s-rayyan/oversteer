@@ -49,6 +49,23 @@ export class BootScene extends Phaser.Scene {
       rect(0x000000, 2, 1, w - 4, h - 2); rect(0x000000, 1, 2, w - 2, h - 4); // rounded shadow
       bake(`car-${c.id}-shadow`, w, h);
     }
+    // Police cruiser (17x9, facing +x) in two frames so the light bar can flash red/blue.
+    const cruiser = (key: string, left: number, right: number) => {
+      const [w, h] = [17, 9];
+      rect(0x14121f, 2, 0, 3, 1); rect(0x14121f, 2, h - 1, 3, 1); rect(0x14121f, 11, 0, 3, 1); rect(0x14121f, 11, h - 1, 3, 1); // wheels
+      rect(0x8d99ae, 1, 1, w - 2, h - 2); // body outline
+      rect(0xf1faee, 2, 2, w - 4, h - 4); // body
+      rect(0x14121f, 2, 2, 5, h - 4); rect(0x14121f, 11, 2, 4, h - 4); // black doors and trunk
+      rect(0x1d3557, 9, 2, 2, h - 4); rect(0x1d3557, 6, 2, 2, h - 4); // windows
+      rect(left, 7, 2, 2, 2); rect(right, 7, h - 4, 2, 2); // light bar
+      rect(0xffd166, w - 2, 2, 1, 1); rect(0xffd166, w - 2, h - 3, 1, 1); // headlights
+      rect(0xff6b6b, 1, 2, 1, 1); rect(0xff6b6b, 1, h - 3, 1, 1); // tail lights
+      bake(key, w, h);
+    };
+    cruiser('police-a', 0xe63946, 0x4895ef);
+    cruiser('police-b', 0x4895ef, 0xe63946);
+    rect(0x000000, 2, 1, 13, 7); rect(0x000000, 1, 2, 15, 5); bake('police-shadow', 17, 9);
+
     // Coin 7x7.
     rect(0x9c6a00, 1, 0, 5, 7); rect(0x9c6a00, 0, 1, 7, 5);
     rect(0xffd166, 1, 1, 5, 5); rect(0xfff1b8, 2, 2, 1, 2);

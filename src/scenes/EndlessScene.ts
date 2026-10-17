@@ -8,6 +8,7 @@ import type { Pt } from '../game/spline';
 import { getName } from '../game/player';
 import { BOARD_ENDLESS, BOARD_OVERSTEER, submitScore } from '../net/leaderboard';
 import { firebaseConfigured } from '../net/firebase';
+import { CATCH_RADIUS, PoliceCar } from '../game/Police';
 import { DriveScene, type Spawn } from './DriveScene';
 
 const CHUNK = 48; // samples per rendered chunk
@@ -15,6 +16,12 @@ const AHEAD = 520; // samples generated ahead of the car
 const BEHIND = 260; // samples kept behind the car
 const START = 24; // spawn sample
 const WINDOW = 40;
+const POLICE_FIRST = 12; // seconds of racing before the first cruiser appears
+const POLICE_EVERY = 20; // seconds between further cruisers
+const POLICE_MAX = 3;
+const POLICE_SPEED = 0.9; // endless: fraction of the player's top speed (boosting outruns them)
+const POLICE_SPEED_OVERSTEER = 0.9; // OVERSTEER: fraction of the *boosted* top speed, so they beat you whenever the boost runs dry
+const POLICE_SPAWN_BEHIND = 90; // road samples behind the car
 
 interface Chunk {
   kerb: Phaser.GameObjects.Graphics;
@@ -36,6 +43,7 @@ export class EndlessScene extends DriveScene {
   private maxIdx = 0;
   private ground!: Phaser.GameObjects.TileSprite;
   private best = 0;
+  private cops: PoliceCar[] = [];
 
   constructor(key: string = SceneKey.Endless) {
     super(key);
@@ -58,6 +66,7 @@ export class EndlessScene extends DriveScene {
     this.idx = START;
     this.maxIdx = START;
     this.best = getEndlessBest(this.mode);
+    this.cops = [];
 
     this.ground = this.add.tileSprite(0, 0, GAME_WIDTH, GAME_HEIGHT, `ground-${this.theme}`)
       .setOrigin(0).setScrollFactor(0).setDepth(0);
@@ -136,10 +145,40 @@ export class EndlessScene extends DriveScene {
     return Math.sqrt(bd) > this.pts[best].half;
   }
 
-  protected afterUpdate(): void {
+  protected afterUpdate(dt: number): void {
     const cam = this.cameras.main;
     this.ground.tilePositionX = Math.floor(cam.scrollX);
     this.ground.tilePositionY = Math.floor(cam.scrollY);
+    this.updatePolice(dt);
+  }
+
+  /** Cruisers join the chase over time; if one reaches the car the run ends. */
+  private updatePolice(dt: number): void {
+    if (this.state !== 'racing') return;
+    const due = this.raceTime >= POLICE_FIRST + this.cops.length * POLICE_EVERY;
+    if (due && this.cops.length < POLICE_MAX) {
+      this.cops.push(new PoliceCar(this, this.pts, Math.max(0, this.idx - POLICE_SPAWN_BEHIND)));
+      this.showFlash('POLICE BEHIND YOU!', 2000);
+    }
+    for (const cop of this.cops) {
+      // Falls behind -> speeds up a little so a cruiser never drops out of the chase for good.
+      const gap = cop.distanceTo(this.car.x, this.car.y);
+      const catchUp = 1 + Phaser.Math.Clamp((gap - 150) / 600, 0, 0.35);
+      cop.update(dt, this.time.now, this.pts, this.idx, this.car, this.policeTop() * catchUp);
+      if (gap < CATCH_RADIUS) return this.bust();
+    }
+  }
+
+  private policeTop(): number {
+    const st = this.car.stats;
+    return this.mode === 'oversteer' ? st.maxSpeed * st.boostSpeed * POLICE_SPEED_OVERSTEER : st.maxSpeed * POLICE_SPEED;
+  }
+
+  private bust(): void {
+    const m = this.meters();
+    this.saveBest(); // the run still counts
+    this.settle();
+    this.finish('BUSTED!', ['The police caught you.', `Run ended at ${m} m`, `Best ${this.best} m   Coins +${this.coinsPaid}`]);
   }
 
   private meters(): number {
@@ -154,7 +193,9 @@ export class EndlessScene extends DriveScene {
   }
 
   protected hudLines(): string[] {
-    return [`${formatClock(this.raceTime)}  ${this.meters()} m`, `BEST ${Math.max(this.best, this.meters())} m`];
+    const lines = [`${formatClock(this.raceTime)}  ${this.meters()} m`, `BEST ${Math.max(this.best, this.meters())} m`];
+    if (this.cops.length) lines.push(`POLICE x${this.cops.length}`);
+    return lines;
   }
 
   protected mapStatic(): null {

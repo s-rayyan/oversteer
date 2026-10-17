@@ -97,7 +97,7 @@ export abstract class DriveScene extends Phaser.Scene {
   protected abstract restart(): void;
   /** Leaderboard id for this mode (track id or 'endless'). */
   protected abstract board(): string;
-  protected afterUpdate(): void {}
+  protected afterUpdate(_dt: number): void {}
 
   create(): void {
     this.state = 'countdown';
@@ -338,7 +338,7 @@ export abstract class DriveScene extends Phaser.Scene {
     }
     this.mini.update(this.car.x, this.car.y, this.mapNearby());
     this.heatMeter.update(this.car.heat);
-    this.afterUpdate();
+    this.afterUpdate(dt);
   }
 
   /** Drift chains earn coins; they're banked after a short straight, and lost if you touch the grass. */
