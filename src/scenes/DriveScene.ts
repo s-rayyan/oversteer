@@ -24,6 +24,7 @@ export interface Spawn {
 }
 
 const SKID_CAP = 1200;
+const SKID_LIFE = 9000;
 const CAM_LOOKAHEAD = 0.3; // seconds of travel the camera leads by
 const CAM_STIFFNESS = 8; // higher = tighter follow (per second)
 const CAM_DEAD_X = 60; // the car never strays further than this from screen centre (half-screen is 160x90)
@@ -54,7 +55,10 @@ export abstract class DriveScene extends Phaser.Scene {
   private boostGfx!: Phaser.GameObjects.Graphics;
   private boost = 0; // 0..1
   private skidGfx!: Phaser.GameObjects.Graphics;
-  private skids: Array<[number, number]> = [];
+  private skids: Array<[number, number, number, number]> = []; // x, y, time laid, opacity
+  private skidDrawn = 0;
+  private sparks!: Phaser.GameObjects.Particles.ParticleEmitter;
+  private wasBoosting = false;
   private skidsDirty = false;
   private countdown = 3;
   private paused = false;
@@ -124,19 +128,23 @@ export abstract class DriveScene extends Phaser.Scene {
     this.skidGfx = this.add.graphics().setDepth(2);
     this.car = new Car(this, spawn.x, spawn.y, spawn.heading, this.stats, `car-${selectedCar().id}`);
 
-    this.smoke = this.add.particles(0, 0, 'smoke', {
-      lifespan: 450, speed: { min: 4, max: 14 }, scale: { start: 1, end: 3 },
+    this.smoke = this.add.particles(0, 0, 'puff', {
+      lifespan: 450, speed: { min: 4, max: 14 }, scale: { start: 0.5, end: 1.4 },
       alpha: { start: 0.55, end: 0 }, tint: 0xdfe7ef, emitting: false,
     }).setDepth(11);
-    this.dust = this.add.particles(0, 0, 'smoke', {
-      lifespan: 500, speed: { min: 8, max: 26 }, scale: { start: 1, end: 3 },
+    this.dust = this.add.particles(0, 0, 'speck', {
+      lifespan: 500, speed: { min: 8, max: 26 }, scale: { start: 1, end: 2.2 }, rotate: { min: 0, max: 360 },
       alpha: { start: 0.7, end: 0 }, tint: 0xa78a5a, emitting: false,
     }).setDepth(11);
 
-    this.flame = this.add.particles(0, 0, 'smoke', {
-      lifespan: 220, speed: { min: 20, max: 50 }, scale: { start: 2, end: 0 },
+    this.flame = this.add.particles(0, 0, 'spark', {
+      lifespan: 220, speed: { min: 20, max: 50 }, scale: { start: 1.4, end: 0 },
       alpha: { start: 1, end: 0 }, tint: [0xffd166, 0xf4a261, 0xe63946], emitting: false,
     }).setDepth(9);
+    this.sparks = this.add.particles(0, 0, 'spark', {
+      lifespan: 350, speed: { min: 40, max: 110 }, scale: { start: 1, end: 0 },
+      alpha: { start: 1, end: 0 }, tint: [0xfff1b8, 0xffd166], emitting: false,
+    }).setDepth(11);
 
     // The camera is driven by hand (see updateCamera) so it can't fall behind a fast car.
     this.camPos.set(this.car.x, this.car.y);
@@ -309,6 +317,11 @@ export abstract class DriveScene extends Phaser.Scene {
     this.car.rough = !off && this.surface.rough;
     this.car.update(dt, throttle, steer, boosting, handbrake);
     this.updateCamera(dt);
+    if (boosting && !this.wasBoosting) {
+      const p = this.car.point(-8, 0);
+      this.sparks.emitParticleAt(p.x, p.y, 8); // kick of sparks as the boost lights
+    }
+    this.wasBoosting = boosting;
     if (boosting) {
       this.boost = drainBoost(this.boost, this.stats, dt);
       const p = this.car.point(-8, 0);
@@ -417,7 +430,7 @@ export abstract class DriveScene extends Phaser.Scene {
     } else if (this.slipNow() > DRIFT_SLIP && this.car.speed > DRIFT_MIN_SPEED) {
       for (const side of [-3, 3]) {
         const p = this.car.point(-5, side);
-        this.skids.push([Math.floor(p.x), Math.floor(p.y)]);
+        this.skids.push([Math.floor(p.x), Math.floor(p.y), this.time.now, Phaser.Math.Clamp(0.2 + this.slipNow() * 0.25, 0.2, 0.55)]);
       }
       if (this.skids.length > SKID_CAP) this.skids.splice(0, this.skids.length - SKID_CAP);
       this.skidsDirty = true;
@@ -427,10 +440,14 @@ export abstract class DriveScene extends Phaser.Scene {
       this.smoke.emitParticleAt(rear.x, rear.y, 1);
     }
 
-    if (this.skidsDirty) {
-      this.skidGfx.clear().fillStyle(0x14121f, 0.4);
-      for (const [x, y] of this.skids) this.skidGfx.fillRect(x, y, 1, 1);
+    // Marks fade out over SKID_LIFE ms; redraw a few times a second while any remain.
+    const now = this.time.now;
+    if (this.skidsDirty || (this.skids.length && now - this.skidDrawn > 150)) {
+      while (this.skids.length && now - this.skids[0][2] > SKID_LIFE) this.skids.shift();
+      this.skidGfx.clear();
+      for (const [x, y, t, a] of this.skids) this.skidGfx.fillStyle(0x14121f, a * (1 - (now - t) / SKID_LIFE)).fillRect(x, y, 1, 1);
       this.skidsDirty = false;
+      this.skidDrawn = now;
     }
   }
 }

@@ -32,15 +32,21 @@ export class BootScene extends Phaser.Scene {
       }
       rect(body.clone().darken(40).color, 1, 1, w - 2, h - 2); // body outline
       rect(c.color, 2, 2, w - 4, h - 4); // body
+      rect(body.clone().lighten(25).color, 3, 2, w - 6, 1); // roof highlight
+      rect(body.clone().darken(20).color, 3, h - 3, w - 6, 1); // shaded lower panel
       rect(c.stripe ?? 0xffffff, 2, Math.floor(h / 2), w - 4, 1); // racing stripe
       const wsX = Math.round(w * 0.5);
       rect(0x1d3557, wsX, 2, 3, h - 4); // windshield
       rect(0x457b9d, wsX, 2, 1, h - 4);
       rect(0x1d3557, Math.round(w * 0.25), 2, 2, h - 4); // rear window
+      rect(body.clone().darken(40).color, wsX, 0, 2, 1); rect(body.clone().darken(40).color, wsX, h - 1, 2, 1); // mirrors
       rect(0xffd166, w - 2, 2, 1, 1); rect(0xffd166, w - 2, h - 3, 1, 1); // headlights
+      rect(0xfff1b8, w - 1, 2, 1, 1); rect(0xfff1b8, w - 1, h - 3, 1, 1); // headlight glow
       rect(0xff6b6b, 1, 2, 1, 1); rect(0xff6b6b, 1, h - 3, 1, 1); // tail lights
+      if (w >= 17) rect(0x14121f, 0, 2, 1, h - 4); // rear spoiler on the big cars
+      else { rect(0x8a2b3a, 0, 2, 1, 1); rect(0x8a2b3a, 0, h - 3, 1, 1); } // tail light glow
       bake(`car-${c.id}`, w, h);
-      rect(0x000000, 1, 1, w - 2, h - 2); // shadow
+      rect(0x000000, 2, 1, w - 4, h - 2); rect(0x000000, 1, 2, w - 2, h - 4); // rounded shadow
       bake(`car-${c.id}-shadow`, w, h);
     }
     // Coin 7x7.
@@ -54,6 +60,10 @@ export class BootScene extends Phaser.Scene {
       [[3, 4], [20, 9], [11, 22], [27, 26], [6, 14], [16, 2]].forEach(([x, y]) => rect(p.light, x, y, 2, 2));
       [[8, 8], [24, 18], [14, 28], [29, 5], [2, 24]].forEach(([x, y]) => rect(p.dark, x, y, 2, 1));
       bake(`ground-${theme}`, 32, 32);
+      // Soft patches scattered over the ground to hide the tile repeat.
+      g.fillStyle(p.dark, 0.35).fillRect(2, 0, 10, 1).fillRect(0, 1, 14, 3).fillRect(2, 4, 10, 1);
+      g.fillStyle(p.light, 0.4).fillRect(4, 1, 5, 1).fillRect(3, 2, 3, 1);
+      bake(`patch-${theme}`, 14, 5);
     }
 
     // Scenery per theme (all ~16px wide, drawn bottom-anchored).
@@ -67,6 +77,30 @@ export class BootScene extends Phaser.Scene {
     };
     tree('deco-grass', 0x1b4332, 0x6b4226, 0x1f5a3d, 0x2d8a5a, 0x52b788);
     tree('deco-night', 0x0e1f19, 0x3b2616, 0x143d2b, 0x1d5a40, 0x2f7d5b);
+
+    // A second look for every theme: a low bush (-b) and a rock (-c), so the scenery isn't all one sprite.
+    const bush = (key: string, shadow: number, dark: number, mid: number, light: number) => {
+      rect(shadow, 2, 9, 9, 1);
+      rect(dark, 2, 4, 9, 5); rect(dark, 4, 2, 5, 2);
+      rect(mid, 3, 4, 6, 4); rect(mid, 5, 3, 3, 1);
+      rect(light, 4, 4, 2, 1);
+      bake(key, 13, 10);
+    };
+    const rock = (key: string, shadow: number, dark: number, mid: number, light: number) => {
+      rect(shadow, 1, 6, 9, 1);
+      rect(dark, 1, 3, 8, 3); rect(dark, 3, 1, 4, 2);
+      rect(mid, 2, 3, 6, 2); rect(mid, 3, 2, 3, 1);
+      rect(light, 3, 2, 2, 1);
+      bake(key, 11, 7);
+    };
+    bush('deco-grass-b', 0x1b4332, 0x1f5a3d, 0x2d8a5a, 0x52b788);
+    bush('deco-night-b', 0x0e1f19, 0x143d2b, 0x1d5a40, 0x2f7d5b);
+    bush('deco-desert-b', 0xbf9150, 0x7a5a2b, 0x9c7a3f, 0xc9a45c);
+    bush('deco-snow-b', 0xc9dde6, 0x2f6b4d, 0xdcebf1, 0xffffff);
+    rock('deco-grass-c', 0x1b4332, 0x5c6470, 0x868e99, 0xb4bbc4);
+    rock('deco-night-c', 0x0e1f19, 0x2c323d, 0x454d5a, 0x6a7482);
+    rock('deco-desert-c', 0xbf9150, 0x8c5e2b, 0xa8743a, 0xc99a5e);
+    rock('deco-snow-c', 0xb4ccd8, 0x7d8a96, 0xaeb9c3, 0xffffff);
 
     // Cactus.
     rect(0xbf9150, 4, 16, 9, 2);
@@ -86,6 +120,10 @@ export class BootScene extends Phaser.Scene {
     bake('deco-snow', 16, 19);
 
     rect(0xffffff, 0, 0, 2, 2); bake('smoke', 2, 2);
+    // Particle shapes: a round puff (smoke), a speck (dust) and a diamond spark (boost flame / sparks).
+    rect(0xffffff, 1, 0, 3, 5); rect(0xffffff, 0, 1, 5, 3); bake('puff', 5, 5);
+    rect(0xffffff, 0, 0, 2, 1); rect(0xffffff, 0, 1, 1, 1); bake('speck', 2, 2);
+    rect(0xffffff, 1, 0, 1, 3); rect(0xffffff, 0, 1, 3, 1); bake('spark', 3, 3);
     g.destroy();
 
     this.scene.start(SceneKey.Title);

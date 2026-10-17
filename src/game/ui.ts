@@ -39,7 +39,9 @@ export class Overlay {
     };
 
     add(s.add.rectangle(0, 0, GAME_WIDTH, GAME_HEIGHT, 0x0b0a14, 0.7).setOrigin(0).setInteractive());
+    add(s.add.rectangle(cx + 2, top + h / 2 + 2, w, h, 0x000000, 0.45)); // drop shadow
     add(s.add.rectangle(cx, top + h / 2, w, h, 0x1d1b2e).setStrokeStyle(2, 0xffd166));
+    add(s.add.rectangle(cx, top + h / 2, w - 6, h - 6).setStrokeStyle(1, 0x3d405b)); // inner border
     add(s.add.text(cx, top + 14, title, { ...base, fontSize: '12px', color: '#ffd166' }).setOrigin(0.5));
 
     let y = top + 32;

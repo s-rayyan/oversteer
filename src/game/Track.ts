@@ -36,6 +36,9 @@ export function paintRoad(
   i1: number,
 ): void {
   for (let i = i0; i <= i1; i++) {
+    kerb.fillStyle(0x14121f, 0.55).fillCircle(pts[i].x, pts[i].y, pts[i].half + KERB + 1); // dark edge so the road reads against the ground
+  }
+  for (let i = i0; i <= i1; i++) {
     const stripe = Math.floor(i / 3) % 2 === 1;
     // drift zones have blue kerbs, everything else red
     kerb.fillStyle(stripe ? 0xf1faee : pts[i].zone ? 0x4895ef : 0xe63946).fillCircle(pts[i].x, pts[i].y, pts[i].half + KERB);
@@ -51,6 +54,19 @@ export function paintRoad(
     road
       .fillStyle(color, 0.8)
       .fillRect(Math.floor(pts[i].x + Math.cos(a) * r), Math.floor(pts[i].y + Math.sin(a) * r), 1, 1);
+  }
+  // worn tyre lanes either side of the centre line
+  for (let i = i0; i < Math.min(i1, pts.length - 2); i++) {
+    if (pts[i].rough) continue;
+    const a = pts[i];
+    const b = pts[i + 1];
+    const len = Math.hypot(b.x - a.x, b.y - a.y) || 1;
+    const off = a.half * 0.45;
+    for (const side of [-1, 1]) {
+      const x = a.x - ((b.y - a.y) / len) * off * side;
+      const y = a.y + ((b.x - a.x) / len) * off * side;
+      road.fillStyle(0x000000, 0.12).fillRect(Math.floor(x) - 1, Math.floor(y) - 1, 2, 2);
+    }
   }
   for (let i = i0; i <= i1; i++) {
     if (Math.floor(i / 4) % 2 || pts[i].rough) continue;
@@ -114,6 +130,11 @@ export function paintStartLine(g: Phaser.GameObjects.Graphics, a: Pt, b: Pt, wid
   }
 }
 
+/** Picks a scenery sprite for the theme: mostly the tree, sometimes a bush or a rock. */
+export function decoKey(theme: string, roll: number): string {
+  return roll < 0.55 ? `deco-${theme}` : roll < 0.8 ? `deco-${theme}-b` : `deco-${theme}-c`;
+}
+
 export function treeDepth(y: number): number {
   return 20 + y * 1e-6;
 }
@@ -143,6 +164,13 @@ export function buildTrack(scene: Phaser.Scene, def: TrackDef): BuiltTrack {
     return false;
   };
 
+  for (let i = 0; i < 110; i++) {
+    const x = Math.floor(bounds.x + rng.frac() * bounds.width);
+    const y = Math.floor(bounds.y + rng.frac() * bounds.height);
+    if (nearRoad(x, y, 14)) continue;
+    scene.add.image(x, y, `patch-${def.theme}`).setDepth(0.3);
+  }
+
   const deco = scene.add.graphics().setDepth(0.5);
   const flowerColors: Record<string, number[]> = {
     grass: [0xf4a261, 0xe9c46a, 0xf1faee, 0xe76f51],
@@ -168,7 +196,7 @@ export function buildTrack(scene: Phaser.Scene, def: TrackDef): BuiltTrack {
     const y = bounds.y + rng.frac() * bounds.height;
     if (!nearRoad(x, y, 28)) trees.push({ x, y });
   }
-  trees.forEach((t) => scene.add.image(Math.floor(t.x), Math.floor(t.y), `deco-${def.theme}`).setOrigin(0.5, 0.9).setDepth(treeDepth(t.y)));
+  trees.forEach((t) => scene.add.image(Math.floor(t.x), Math.floor(t.y), decoKey(def.theme, rng.frac())).setOrigin(0.5, 0.9).setDepth(treeDepth(t.y)));
 
   return { samples, bounds };
 }

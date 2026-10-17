@@ -2,7 +2,7 @@ import Phaser from 'phaser';
 import { GAME_HEIGHT, GAME_WIDTH, SceneKey } from '../game/config';
 import { formatClock, formatTime, getEndlessBest, submitEndless, type DistanceMode } from '../game/records';
 import { STEP, RoadGenerator } from '../game/roadGen';
-import { paintRoad, paintStartLine, treeDepth, type RoadPt } from '../game/Track';
+import { decoKey, paintRoad, paintStartLine, treeDepth, type RoadPt } from '../game/Track';
 import { THEMES, type Theme } from '../game/tracks';
 import type { Pt } from '../game/spline';
 import { getName } from '../game/player';
@@ -112,7 +112,7 @@ export class EndlessScene extends DriveScene {
         blocked = Math.hypot(this.pts[j].x - x, this.pts[j].y - y) < this.pts[j].half + 24;
       }
       if (!blocked) {
-        trees.push(this.add.image(Math.floor(x), Math.floor(y), `deco-${this.theme}`).setOrigin(0.5, 0.9).setDepth(treeDepth(y)));
+        trees.push(this.add.image(Math.floor(x), Math.floor(y), decoKey(this.theme, this.rng.frac())).setOrigin(0.5, 0.9).setDepth(treeDepth(y)));
       }
     }
     this.chunks.set(k, { kerb, road, trees });
