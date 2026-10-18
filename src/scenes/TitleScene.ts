@@ -1,6 +1,8 @@
 import Phaser from 'phaser';
-import { GAME_HEIGHT, GAME_WIDTH, SceneKey } from '../game/config';
+import { GAME_WIDTH, SceneKey } from '../game/config';
 import { selectedCar } from '../game/profile';
+import { getName } from '../game/player';
+import { markTutorialSeen, tutorialSeen } from '../game/tutorial';
 import { paintRoad, paintStartLine, type RoadPt } from '../game/Track';
 
 // Framed showcase panel (same style as the menu's track preview) with an oval the cars drift around.
@@ -28,6 +30,7 @@ export class TitleScene extends Phaser.Scene {
     ['PLAY', SceneKey.Menu],
     ['GARAGE', SceneKey.Garage],
     ['LEADERBOARD', SceneKey.Leaderboard],
+    ['TUTORIAL', SceneKey.Tutorial],
   ];
 
   constructor() {
@@ -47,13 +50,12 @@ export class TitleScene extends Phaser.Scene {
     this.buildShowcase();
 
     this.items = this.entries.map(([label], i) =>
-      this.add.text(GAME_WIDTH / 2, 138 + i * 12, label, { ...mono, fontSize: '10px' })
+      this.add.text(GAME_WIDTH / 2, 134 + i * 12, label, { ...mono, fontSize: '10px' })
         .setOrigin(0.5)
         .setInteractive({ useHandCursor: true })
         .on('pointerover', () => this.select(i))
         .on('pointerdown', () => this.go(i)),
     );
-    this.add.text(GAME_WIDTH / 2, GAME_HEIGHT - 6, 'UP/DOWN select   ENTER confirm', { ...mono, fontSize: '8px', color: '#8d99ae' }).setOrigin(0.5);
     this.select(0);
 
     const kb = this.input.keyboard!;
@@ -117,7 +119,11 @@ export class TitleScene extends Phaser.Scene {
     this.leaving = true;
     this.select(i);
     this.cameras.main.fadeOut(200, 20, 18, 31);
-    this.cameras.main.once('camerafadeoutcomplete', () => this.scene.start(this.entries[i][1]));
+    // First-time players (no name yet, tutorial never shown) are taken through the tutorial before the track list.
+    let next: string = this.entries[i][1];
+    if (next === SceneKey.Menu && !tutorialSeen() && !getName()) next = SceneKey.Tutorial;
+    if (next === SceneKey.Tutorial) markTutorialSeen();
+    this.cameras.main.once('camerafadeoutcomplete', () => this.scene.start(next));
   }
 
   update(_time: number, delta: number): void {

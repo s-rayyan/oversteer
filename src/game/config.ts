@@ -11,4 +11,5 @@ export const SceneKey = {
   Oversteer: 'OversteerScene',
   Leaderboard: 'LeaderboardScene',
   Garage: 'GarageScene',
+  Tutorial: 'TutorialScene',
 } as const;

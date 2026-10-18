@@ -71,9 +71,10 @@ export async function syncGhost(board: string, name: string, local: GhostData): 
   }
 }
 
-/** The fastest replay anyone has uploaded for this track, or null if there isn't one (or we're offline). */
-export async function fetchTopGhost(board: string): Promise<OnlineGhost | null> {
+/** The fastest replay anyone has uploaded for this track; null if there isn't one yet; 'error' if we couldn't reach the server. */
+export async function fetchTopGhost(board: string): Promise<OnlineGhost | null | 'error'> {
   if (!firebaseConfigured) return null;
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) return 'error';
   try {
     const { db, fs } = await getFirebase();
     const snap = await fs.getDocs(fs.query(fs.collection(db, 'boards', board, 'ghosts'), fs.orderBy('time', 'asc'), fs.limit(1)));
@@ -83,6 +84,6 @@ export async function fetchTopGhost(board: string): Promise<OnlineGhost | null> 
     if (!frames) return null;
     return { uid: String(d.uid), name: String(d.name), ghost: { time: (d.time as number) / 1000, carId: String(d.carId), frames } };
   } catch {
-    return null;
+    return 'error';
   }
 }

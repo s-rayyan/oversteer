@@ -9,7 +9,7 @@ import { askName } from '../game/nameDialog';
 import { MiniMap } from '../game/MiniMap';
 import type { Pt } from '../game/spline';
 import { addCoins, equippedStats, selectedCar } from '../game/profile';
-import { Overlay } from '../game/ui';
+import { Overlay, type OverlayEntry } from '../game/ui';
 import { firebaseConfigured } from '../net/firebase';
 import { submitScore, formatScore, type SubmitResult } from '../net/leaderboard';
 import { HeatMeter } from '../game/HeatMeter';
@@ -56,18 +56,22 @@ export abstract class DriveScene extends Phaser.Scene {
   private dust!: Phaser.GameObjects.Particles.ParticleEmitter;
   private flame!: Phaser.GameObjects.Particles.ParticleEmitter;
   private boostGfx!: Phaser.GameObjects.Graphics;
-  private boost = 0; // 0..1
+  protected boost = 0; // 0..1
   private skidGfx!: Phaser.GameObjects.Graphics;
   private skids: Array<[number, number, number, number]> = []; // x, y, time laid, opacity
   private skidDrawn = 0;
   private sparks!: Phaser.GameObjects.Particles.ParticleEmitter;
-  private wasBoosting = false;
+  protected wasBoosting = false;
   private uiCam!: Phaser.Cameras.Scene2D.Camera;
   private pendingUi: Phaser.GameObjects.GameObject[] = [];
   private vignette!: Phaser.GameObjects.Image;
   private zoom = 1;
   private skidsDirty = false;
   private countdown = 3;
+  /** Seconds of countdown before the race starts. */
+  protected countdownFrom = 3;
+  /** False in practice modes, which pay no coins. */
+  protected showCoins = true;
   private paused = false;
   private wasPad = false;
   private camPos = new Phaser.Math.Vector2();
@@ -113,7 +117,7 @@ export abstract class DriveScene extends Phaser.Scene {
   create(): void {
     this.state = 'countdown';
     this.raceTime = 0;
-    this.countdown = 3;
+    this.countdown = this.countdownFrom;
     this.paused = false;
     this.skids = [];
     this.boost = 1;
@@ -276,11 +280,16 @@ export abstract class DriveScene extends Phaser.Scene {
 
   private showFinish(selected: number): void {
     const cfg = this.finishCfg!;
-    this.overlay.show(cfg.title, cfg.lines, [
+    this.overlay.show(cfg.title, cfg.lines, this.finishEntries(), selected);
+  }
+
+  /** Buttons on the end-of-run panel. */
+  protected finishEntries(): OverlayEntry[] {
+    return [
       { label: this.restartLabel, action: () => this.restart() },
       { label: 'Leaderboard', action: () => this.scene.start(SceneKey.Leaderboard, { board: this.board() }) },
       { label: 'Change track', action: () => this.scene.start(SceneKey.Menu) },
-    ], selected);
+    ];
   }
 
   /** Posts a score to the global leaderboard (asking for a name first if needed) and reports the rank in the results panel. */
@@ -424,6 +433,7 @@ export abstract class DriveScene extends Phaser.Scene {
     if (this.driftChain >= 1) this.coinText.setText(`DRIFT +${Math.floor(this.driftChain)}`).setColor('#f4a261');
     else if (this.lostTimer > 0) this.coinText.setText('DRIFT LOST').setColor('#e63946');
     else this.coinText.setText(total > 0 ? `COINS +${total}` : '').setColor('#ffd166');
+    if (!this.showCoins) this.coinText.setText('');
   }
 
   /**

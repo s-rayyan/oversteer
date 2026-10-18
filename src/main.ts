@@ -10,6 +10,7 @@ import { EndlessScene } from './scenes/EndlessScene';
 import { OversteerScene } from './scenes/OversteerScene';
 import { RaceScene } from './scenes/RaceScene';
 import { TitleScene } from './scenes/TitleScene';
+import { TutorialScene } from './scenes/TutorialScene';
 
 
 function start(): void {
@@ -25,7 +26,7 @@ function start(): void {
       mode: Phaser.Scale.FIT,
       autoCenter: Phaser.Scale.CENTER_BOTH,
     },
-    scene: [BootScene, TitleScene, MenuScene, RaceScene, EndlessScene, OversteerScene, LeaderboardScene, GarageScene],
+    scene: [BootScene, TitleScene, MenuScene, RaceScene, EndlessScene, OversteerScene, LeaderboardScene, GarageScene, TutorialScene],
   });
 
   // Catch up any scores earned while offline, now and whenever the connection returns.

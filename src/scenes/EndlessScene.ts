@@ -20,7 +20,11 @@ const POLICE_FIRST = 12; // seconds of racing before the first cruiser appears
 const POLICE_EVERY = 20; // seconds between further cruisers
 const POLICE_MAX = 3;
 const POLICE_SPEED = 0.9; // endless: fraction of the player's top speed (boosting outruns them)
-const POLICE_SPEED_OVERSTEER = 0.9; // OVERSTEER: fraction of the *boosted* top speed, so they beat you whenever the boost runs dry
+const POLICE_SPEED_OVERSTEER = 0.58; // OVERSTEER: fraction of the *boosted* top speed (~1.15x your unboosted top speed): they catch you only once the boost runs dry
+const POLICE_NEAR = 0.8; // speed multiplier when a cruiser is right on you (eases off so it isn't unfair)...
+const POLICE_FAR = 1.4; // ...rising to this when it's far behind, so it always closes the gap again
+const POLICE_NEAR_GAP = 80; // px at or below which the NEAR multiplier applies
+const POLICE_FAR_GAP = 480; // px at or above which the FAR multiplier applies
 const POLICE_SPAWN_BEHIND = 90; // road samples behind the car
 
 interface Chunk {
@@ -166,10 +170,10 @@ export class EndlessScene extends DriveScene {
       this.showFlash('POLICE BEHIND YOU!', 2000);
     }
     for (const cop of this.cops) {
-      // Falls behind -> speeds up a little so a cruiser never drops out of the chase for good.
+      // Rubber band: the further back a cruiser is, the faster it drives; it eases off as it closes in.
       const gap = cop.distanceTo(this.car.x, this.car.y);
-      const catchUp = 1 + Phaser.Math.Clamp((gap - 150) / 600, 0, 0.35);
-      cop.update(dt, this.time.now, this.pts, this.idx, this.car, this.policeTop() * catchUp);
+      const t = Phaser.Math.Clamp((gap - POLICE_NEAR_GAP) / (POLICE_FAR_GAP - POLICE_NEAR_GAP), 0, 1);
+      cop.update(dt, this.time.now, this.pts, this.idx, this.car, this.policeTop() * Phaser.Math.Linear(POLICE_NEAR, POLICE_FAR, t));
       if (gap < CATCH_RADIUS) return this.bust();
     }
   }

@@ -2,6 +2,7 @@ import Phaser from 'phaser';
 import { GAME_HEIGHT, GAME_WIDTH, SceneKey } from '../game/config';
 import { TRACKS } from '../game/tracks';
 import { firebaseConfigured } from '../net/firebase';
+import { getLocalBests } from '../game/records';
 import { BOARD_ENDLESS, BOARD_OVERSTEER, fetchTop, formatScore } from '../net/leaderboard';
 
 const BOARDS = [...TRACKS.map((t) => ({ id: t.id, name: t.name })), { id: BOARD_ENDLESS, name: 'Endless' }, { id: BOARD_OVERSTEER, name: 'OVERSTEER' }];
@@ -60,6 +61,12 @@ export class LeaderboardScene extends Phaser.Scene {
     this.loadBoard();
   }
 
+  /** Shown when there's no connection: your own saved best, and a note that it will upload later. */
+  private offlineText(boardId: string): string {
+    const mine = getLocalBests().find((b) => b.board === boardId);
+    return `You're offline.\n${mine ? `Your best here: ${formatScore(boardId, mine.value)}\n` : ''}Scores upload when you're back online.`;
+  }
+
   private loadBoard(): void {
     const board = BOARDS[this.idx];
     this.title.setText(board.name);
@@ -67,6 +74,10 @@ export class LeaderboardScene extends Phaser.Scene {
 
     if (!firebaseConfigured) {
       this.status.setText('Leaderboard not set up.\nAdd your Firebase keys to .env\n(see README.md).');
+      return;
+    }
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      this.status.setText(this.offlineText(board.id));
       return;
     }
     this.status.setText('Loading...');
@@ -83,6 +94,10 @@ export class LeaderboardScene extends Phaser.Scene {
       .catch((e: unknown) => {
         console.error('[leaderboard]', e);
         if (token !== this.token || !this.scene.isActive()) return;
+        if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+          this.status.setText(this.offlineText(board.id));
+          return;
+        }
         const code = (e as { code?: string }).code ?? (e as Error).message ?? 'unknown';
         this.status.setText(`Couldn't reach the leaderboard.\n${String(code).replace('auth/', '').replace('permission-denied', 'permission denied (check rules)').slice(0, 60)}`);
       });

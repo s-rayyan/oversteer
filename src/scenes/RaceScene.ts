@@ -37,7 +37,7 @@ export class RaceScene extends DriveScene {
   private mine: GhostRunner | null = null;
   private top: GhostRunner | null = null;
   private topInfo: OnlineGhost | null = null;
-  private topStatus: 'loading' | 'ready' | 'none' | 'offline' = 'loading';
+  private topStatus: 'loading' | 'ready' | 'none' | 'error' | 'offline' = 'loading';
   private ghostMode: GhostMode = 'mine';
   private runToken = 0; // lets a late network reply tell it belongs to a scene that has since restarted
   private rec: number[] = [];
@@ -83,7 +83,11 @@ export class RaceScene extends DriveScene {
     if (firebaseConfigured) {
       void fetchTopGhost(board).then((t) => {
         if (token !== this.runToken || !this.scene.isActive()) return;
-        if (!t) { this.topStatus = 'none'; if (this.ghostMode === 'top') this.showFlash('NO ONLINE GHOST YET - RACING YOUR BEST', 2200); return; }
+        if (t === 'error' || !t) {
+          this.topStatus = t === 'error' ? 'error' : 'none';
+          if (this.ghostMode === 'top') this.showFlash(t === 'error' ? "CAN'T REACH ONLINE GHOST - RACING YOUR BEST" : 'NO ONLINE GHOST YET - RACING YOUR BEST', 2400);
+          return;
+        }
         this.topInfo = t;
         this.top = new GhostRunner(this, t.ghost, TOP_TINT);
         this.topStatus = 'ready';
@@ -221,7 +225,7 @@ export class RaceScene extends DriveScene {
     if (m === 'top' || m === 'both') {
       out.push(this.topStatus === 'ready' && this.topInfo
         ? `vs ${shortName(this.topInfo.name)}  ${formatTime(this.topInfo.ghost.time)}`
-        : this.topStatus === 'loading' ? 'vs TOP: loading...' : 'vs TOP: none yet');
+        : this.topStatus === 'loading' ? 'vs TOP: loading...' : this.topStatus === 'error' ? 'vs TOP: offline' : 'vs TOP: none yet');
     }
     return out;
   }
