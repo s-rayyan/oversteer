@@ -2,6 +2,7 @@ import { defineConfig } from 'vite';
 
 export default defineConfig({
   base: './',
+  plugins: [],
   build: {
     chunkSizeWarningLimit: 1500,
     rollupOptions: {
