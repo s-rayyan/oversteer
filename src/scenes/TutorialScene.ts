@@ -25,17 +25,17 @@ interface Step {
 
 const STEPS: Step[] = [
   { title: 'DRIVE', text: ['Hold UP (or W) to speed up.', 'LEFT / RIGHT to steer.'] },
-  { title: 'DRIFT', text: ['Steering heats your tyres.', 'Hot tyres slide: corner fast or tap X.'] },
+  { title: 'DRIFT', text: ['Swerve hard left and right to heat', 'your tyres. Hot tyres slide (X helps).'] },
   { title: 'BOOST', text: ['Hold SPACE to boost.', 'Use it until the bar is nearly empty.'] },
-  { title: 'REFILL', text: ['Drifting refills the boost bar.', 'Slide around until it is mostly full.'] },
+  { title: 'REFILL', text: ['Drifting refills the boost bar.', 'Slide around until it is half full.'] },
   { title: 'BOOST PAD', text: ['Drive over the yellow pad on the', 'straight to top up your boost.'] },
 ];
 
 const DRIVE_PX = 500; // distance to drive in step 1
-const DRIFT_SECONDS = 2; // time spent sliding in step 2
+const DRIFT_SECONDS = 1.2; // time spent sliding in step 2
 const BOOST_SECONDS = 6; // step 3 also ends after this much boosting, whatever the bar says
 const BOOST_LOW = 0.3; // bar level that counts as "nearly empty"
-const BOOST_REFILLED = 0.7; // bar level that counts as "most of the way full"
+const BOOST_REFILLED = 0.5; // bar level that counts as refilled: half is enough to show the idea, a full tank is too much work here
 
 /** Guided practice: five short tasks that teach steering, drifting, boosting and boost pads. */
 export class TutorialScene extends DriveScene {
@@ -72,6 +72,8 @@ export class TutorialScene extends DriveScene {
 
     this.panel = this.add.rectangle(GAME_WIDTH / 2, 43, 204, 46, 0x14121f, 0.9).setStrokeStyle(1, 0xffd166).setScrollFactor(0).setDepth(100);
     const font = { fontFamily: 'monospace', fontSize: '8px', color: '#c9d1e3' };
+    // Always-on badge so it's obvious this is the tutorial and not a real run.
+    this.add.text(4, 4, ' TUTORIAL MODE ', { ...font, color: '#14121f', backgroundColor: '#ffd166' }).setScrollFactor(0).setDepth(100);
     this.title = this.add.text(GAME_WIDTH / 2, 25, '', { ...font, color: '#ffd166' }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(101);
     this.body = this.add.text(GAME_WIDTH / 2, 36, '', { ...font, align: 'center' }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(101);
     this.bar = this.add.graphics().setScrollFactor(0).setDepth(101);
@@ -192,12 +194,16 @@ export class TutorialScene extends DriveScene {
   }
 
   protected pauseInfo(): { title: string; lines: string[] } {
-    return { title: 'PAUSED', lines: ['Practice Track', `Step ${Math.min(this.step + 1, STEPS.length)} of ${STEPS.length}`] };
+    return { title: 'TUTORIAL PAUSED', lines: ['Practice Track', `Step ${Math.min(this.step + 1, STEPS.length)} of ${STEPS.length}`] };
   }
 
   /** Practice earns nothing, so repeating it can't be used to farm drift coins. */
   protected settle(): number {
     return 0;
+  }
+
+  protected autosave(): void {
+    /* practice earns nothing */
   }
 
   protected modeCoins(): number {

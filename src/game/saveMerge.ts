@@ -14,6 +14,9 @@ export const MIGRATED_KEY = 'oversteer.migratedAt';
 /** Which local bests the global leaderboard already has (per browser, since the leaderboard identity is too). Never transferred. */
 export const LB_SYNCED_KEY = 'oversteer.lbSynced';
 
+/** Things that describe this one device's sign-in or pending chores: never carried to another address or device. */
+export const DEVICE_ONLY_KEYS: readonly string[] = ['oversteer.accountLabel', 'oversteer.cloudSyncedAt', 'oversteer.renamePending', 'oversteer.lbPending'];
+
 const PROFILE = 'oversteer.profile.v1';
 const RECORDS = 'oversteer.records.v1';
 const PLAYER = 'oversteer.player';
@@ -84,7 +87,7 @@ export function mergeSaves(current: SaveData, incoming: SaveData, transferId: st
 
   const out: SaveData = { ...current };
   for (const [key, value] of Object.entries(incoming)) {
-    if (!key.startsWith(SAVE_PREFIX) || key === MIGRATED_KEY || key === IMPORTED_KEY || key === TRANSFER_ID_KEY || key === LB_SYNCED_KEY) continue;
+    if (!key.startsWith(SAVE_PREFIX) || key === MIGRATED_KEY || key === IMPORTED_KEY || key === TRANSFER_ID_KEY || key === LB_SYNCED_KEY || DEVICE_ONLY_KEYS.includes(key)) continue;
     const mine = current[key];
     if (key === PROFILE) {
       const b = parse<Profile>(value);
@@ -114,7 +117,7 @@ export function mergeSaves(current: SaveData, incoming: SaveData, transferId: st
 
 /** True if this save has any progress worth moving. */
 export function hasProgress(save: SaveData): boolean {
-  return Object.keys(save).some((k) => k.startsWith(SAVE_PREFIX) && k !== MIGRATED_KEY && k !== IMPORTED_KEY && k !== TRANSFER_ID_KEY && k !== LB_SYNCED_KEY);
+  return Object.keys(save).some((k) => k.startsWith(SAVE_PREFIX) && k !== MIGRATED_KEY && k !== IMPORTED_KEY && k !== TRANSFER_ID_KEY && k !== LB_SYNCED_KEY && !DEVICE_ONLY_KEYS.includes(k));
 }
 
 /** One-line description of a save for the launcher screen. */

@@ -1,5 +1,18 @@
 {
   "projects": {
     "default": "overs-16336"
-  }
+  },
+  "targets": {
+    "overs-16336": {
+      "hosting": {
+        "main": [
+          "overs-16336"
+        ],
+        "play": [
+          "playoversteer"
+        ]
+      }
+    }
+  },
+  "etags": {}
 }

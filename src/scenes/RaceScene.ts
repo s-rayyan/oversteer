@@ -187,13 +187,13 @@ export class RaceScene extends DriveScene {
   private finishRace(): void {
     const bestThisRun = Math.min(...this.lapTimes);
     const r = submitRace(this.track.id, this.raceTime, bestThisRun);
-    const lines = this.lapTimes.map((t, i) => `Lap ${i + 1}   ${formatTime(t)}`);
+    const lines = [`Laps  ${this.lapTimes.map((t) => t.toFixed(2)).join('  ')}`];
     lines.push(`Total   ${formatTime(this.raceTime)}${r.newBest ? '  NEW RECORD!' : ''}`);
     lines.push(`Best lap ${formatTime(bestThisRun)}${r.newLap ? '  NEW RECORD!' : ''}`);
     const base = RACE_PAY[this.track.difficulty];
     this.finishPayout = base + (r.newBest ? Math.floor(base / 2) : 0);
-    const owed = this.settle();
-    lines.push(`Coins +${owed}  (finish ${this.finishPayout}, drift ${Math.floor(this.driftBank)})`);
+    this.settle();
+    lines.push(`Coins +${this.coinsPaid}  (finish ${this.finishPayout}, drift ${Math.floor(this.driftBank)})`);
     if (saveGhostIfBest(this.track.id, { time: this.raceTime, carId: selectedCar().id, frames: this.rec })) {
       lines.push('Ghost saved');
     }

@@ -6,7 +6,8 @@
 // the standalone game, which merges the save in before starting (see saveMerge.ts). If the browser
 // blocks that automatic redirect, one click on PLAY does it; if even that is blocked, a new tab or a
 // copyable link carries the save instead.
-import { IMPORTED_KEY, LB_SYNCED_KEY, MIGRATED_KEY, SAVE_PREFIX, TRANSFER_ID_KEY, hasProgress, mergeSaves, type SaveData } from './saveMerge';
+import { HOME_HOST } from './config';
+import { DEVICE_ONLY_KEYS, IMPORTED_KEY, LB_SYNCED_KEY, MIGRATED_KEY, SAVE_PREFIX, TRANSFER_ID_KEY, hasProgress, mergeSaves, type SaveData } from './saveMerge';
 
 /** True when the game is running inside an iframe (e.g. the game hub). */
 export function isEmbedded(): boolean {
@@ -15,6 +16,21 @@ export function isEmbedded(): boolean {
   } catch {
     return true; // cross-origin parent
   }
+}
+
+/**
+ * True on an old address of the game: a Firebase Hosting site that isn't the home one. Local development
+ * and any other host are left alone.
+ */
+export function onOldAddress(): boolean {
+  const h = location.hostname;
+  return h !== HOME_HOST && (h.endsWith('.web.app') || h.endsWith('.firebaseapp.com'));
+}
+
+/** Where the standalone game lives: the home address when deployed, otherwise wherever we are (dev). */
+function homeOrigin(): string {
+  const h = location.hostname;
+  return h.endsWith('.web.app') || h.endsWith('.firebaseapp.com') ? `https://${HOME_HOST}` : location.origin;
 }
 
 function readSave(): SaveData {
@@ -47,6 +63,7 @@ function exportable(): SaveData {
   delete s[IMPORTED_KEY];
   delete s[TRANSFER_ID_KEY];
   delete s[LB_SYNCED_KEY];
+  for (const k of DEVICE_ONLY_KEYS) delete s[k];
   return s;
 }
 
@@ -74,12 +91,12 @@ async function pipe(bytes: Uint8Array, stream: GenericTransformStream): Promise<
   return new Uint8Array(await new Response(out).arrayBuffer());
 }
 
-async function encode(payload: unknown): Promise<string> {
+export async function encode(payload: unknown): Promise<string> {
   const raw = new TextEncoder().encode(JSON.stringify(payload));
   return typeof CompressionStream === 'function' ? 'z' + toB64(await pipe(raw, new CompressionStream('gzip'))) : 'j' + toB64(raw);
 }
 
-async function decode(s: string): Promise<{ id: string; data: SaveData }> {
+export async function decode(s: string): Promise<{ id: string; data: SaveData }> {
   const bytes = fromB64(s.slice(1));
   const raw = s[0] === 'z' ? await pipe(bytes, new DecompressionStream('gzip')) : bytes;
   return JSON.parse(new TextDecoder().decode(raw));
@@ -111,13 +128,13 @@ const MAX_LINK = 60_000;
 /** Link to the standalone game carrying this save (all of it if it fits; otherwise without some ghosts). */
 async function saveLink(): Promise<string> {
   const save = exportable();
-  if (!hasProgress(save)) return location.origin + '/';
+  if (!hasProgress(save)) return homeOrigin() + '/';
   const id = transferId();
   const base: SaveData = Object.fromEntries(Object.entries(save).filter(([k]) => !k.startsWith('oversteer.ghost.')));
   const ghosts = Object.entries(save).filter(([k]) => k.startsWith('oversteer.ghost.'));
-  let link = `${location.origin}/#save=${await encode({ id, data: base })}`;
+  let link = `${homeOrigin()}/#save=${await encode({ id, data: base })}`;
   for (const [k, v] of ghosts) {
-    const next = `${location.origin}/#save=${await encode({ id, data: { ...base, [k]: v } })}`;
+    const next = `${homeOrigin()}/#save=${await encode({ id, data: { ...base, [k]: v } })}`;
     if (next.length > MAX_LINK) continue;
     base[k] = v;
     link = next;
@@ -198,4 +215,22 @@ export function showLauncher(playHere: () => void): void {
       playHere();
     });
   }
+}
+
+// ---------- moving players from an old address to the home address, silently ----------
+
+/**
+ * Called instead of starting the game on an old address. Shows nothing: the page is just the game's own dark
+ * background while it packs the save into the link's #fragment (which never leaves the browser) and sends the
+ * tab to the home address, where receiveSave() merges it in before the game starts. If anything goes wrong, or
+ * the move doesn't happen, the game simply starts here with the save it has, so nobody is stranded.
+ */
+export async function moveToHome(playHere: () => void): Promise<void> {
+  try {
+    location.replace(await saveLink());
+  } catch {
+    playHere();
+    return;
+  }
+  setTimeout(playHere, 8000); // still here: the move didn't happen, so just play on this address
 }

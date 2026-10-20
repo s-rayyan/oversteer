@@ -1,7 +1,9 @@
 import Phaser from 'phaser';
 import { GAME_WIDTH, GAME_HEIGHT } from './game/config';
+import { addFpsMeter } from './game/fpsMeter';
+import { initAccountSync } from './net/account';
 import { syncLocalBests } from './net/leaderboard';
-import { isEmbedded, receiveSave, showLauncher } from './game/saveTransfer';
+import { isEmbedded, moveToHome, onOldAddress, receiveSave, showLauncher } from './game/saveTransfer';
 import { BootScene } from './scenes/BootScene';
 import { GarageScene } from './scenes/GarageScene';
 import { LeaderboardScene } from './scenes/LeaderboardScene';
@@ -15,7 +17,9 @@ import { TutorialScene } from './scenes/TutorialScene';
 
 function start(): void {
   const game = new Phaser.Game({
-    type: Phaser.AUTO,
+    // ?renderer=canvas forces the plain 2D renderer, worth a try on a computer where WebGL is slow (no graphics card).
+    type: new URLSearchParams(location.search).get('renderer') === 'canvas' ? Phaser.CANVAS : Phaser.AUTO,
+    render: { powerPreference: 'high-performance' },
     parent: 'game',
     width: GAME_WIDTH,
     height: GAME_HEIGHT,
@@ -30,6 +34,14 @@ function start(): void {
   });
 
   // Catch up any scores earned while offline, now and whenever the connection returns.
+  // F toggles fullscreen (not while typing in a text box).
+  window.addEventListener('keydown', (e) => {
+    const t = e.target as HTMLElement | null;
+    if ((e.key === 'f' || e.key === 'F') && !e.ctrlKey && !e.metaKey && !e.altKey && !(t && /^(INPUT|TEXTAREA)$/.test(t.tagName))) game.scale.toggleFullscreen();
+  });
+
+  addFpsMeter(game);
+  initAccountSync(); // keep a signed-in player's save in step with their online account
   void syncLocalBests();
   window.addEventListener('online', () => void syncLocalBests());
 
@@ -39,4 +51,5 @@ function start(): void {
 // Inside the game hub's iframe, show a launcher that moves the player's save into its own tab.
 // Opened directly, first take in any save being handed over, then start the game.
 if (isEmbedded()) showLauncher(start);
+else if (onOldAddress()) void moveToHome(start); // old web address: silently carry the save to the home one
 else void receiveSave().then(start);

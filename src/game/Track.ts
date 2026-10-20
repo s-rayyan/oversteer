@@ -135,6 +135,48 @@ export function decoKey(theme: string, roll: number): string {
   return roll < 0.55 ? `deco-${theme}` : roll < 0.8 ? `deco-${theme}-b` : `deco-${theme}-c`;
 }
 
+/**
+ * Draws a Graphics object once into render textures (tiled, so no texture is bigger than `tile` px) and removes it.
+ * A Graphics object re-runs every one of its drawing commands on every frame, and a road has tens of thousands of
+ * them, which is what makes slow computers lag. A texture costs the same to draw however much is painted on it.
+ * `area` is the world rectangle that the graphics cover.
+ */
+export function bakeGraphics(
+  scene: Phaser.Scene,
+  gfx: Phaser.GameObjects.Graphics,
+  area: Phaser.Geom.Rectangle,
+  depth: number,
+  tile = 1024,
+): Phaser.GameObjects.RenderTexture[] {
+  const out: Phaser.GameObjects.RenderTexture[] = [];
+  const x0 = Math.floor(area.x);
+  const y0 = Math.floor(area.y);
+  const x1 = Math.ceil(area.right);
+  const y1 = Math.ceil(area.bottom);
+  for (let y = y0; y < y1; y += tile) {
+    for (let x = x0; x < x1; x += tile) {
+      const rt = scene.add.renderTexture(x, y, Math.min(tile, x1 - x), Math.min(tile, y1 - y)).setOrigin(0).setDepth(depth);
+      rt.draw(gfx, -x, -y);
+      out.push(rt);
+    }
+  }
+  gfx.destroy();
+  return out;
+}
+
+/** World rectangle covering road samples [i0, i1] and their kerbs. */
+export function roadArea(pts: RoadPt[], i0: number, i1: number): Phaser.Geom.Rectangle {
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (let i = i0; i <= i1; i++) {
+    const r = pts[i].half + KERB + 4;
+    x0 = Math.min(x0, pts[i].x - r);
+    y0 = Math.min(y0, pts[i].y - r);
+    x1 = Math.max(x1, pts[i].x + r);
+    y1 = Math.max(y1, pts[i].y + r);
+  }
+  return new Phaser.Geom.Rectangle(x0, y0, x1 - x0, y1 - y0);
+}
+
 export function treeDepth(y: number): number {
   return 20 + y * 1e-6;
 }
@@ -189,6 +231,11 @@ export function buildTrack(scene: Phaser.Scene, def: TrackDef): BuiltTrack {
   const road = scene.add.graphics().setDepth(1.1);
   paintRoad(kerb, road, rng, samples, 0, samples.length - 1);
   paintStartLine(road, samples[0], samples[2], samples[0].half * 2);
+  // Everything above is fixed for the whole race: bake it into textures instead of redrawing it every frame.
+  bakeGraphics(scene, deco, bounds, 0.5);
+  const area = roadArea(samples, 0, samples.length - 1);
+  bakeGraphics(scene, kerb, area, 1);
+  bakeGraphics(scene, road, area, 1.1);
 
   const trees: Pt[] = [];
   for (let i = 0; i < 90; i++) {

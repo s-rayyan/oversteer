@@ -1,3 +1,5 @@
+import { saveChanged } from './cloudHook';
+
 const KEY = 'oversteer.player';
 
 /** Letters, digits, space and a few symbols; trimmed to 12 chars (matches firestore.rules). */
@@ -19,4 +21,5 @@ export function setName(name: string): void {
   } catch {
     /* storage unavailable */
   }
+  saveChanged();
 }

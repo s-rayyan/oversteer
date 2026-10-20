@@ -1,7 +1,10 @@
 import Phaser from 'phaser';
-import { GAME_WIDTH, SceneKey } from '../game/config';
+import { GAME_HEIGHT, GAME_WIDTH, SceneKey } from '../game/config';
 import { selectedCar } from '../game/profile';
 import { getName } from '../game/player';
+import { showAccountDialog } from '../game/accountDialog';
+import { cachedAccount } from '../net/account';
+import { firebaseConfigured } from '../net/firebase';
 import { markTutorialSeen, tutorialSeen } from '../game/tutorial';
 import { paintRoad, paintStartLine, type RoadPt } from '../game/Track';
 
@@ -56,6 +59,18 @@ export class TitleScene extends Phaser.Scene {
         .on('pointerover', () => this.select(i))
         .on('pointerdown', () => this.go(i)),
     );
+    if (firebaseConfigured) {
+      const text = this.add.text(GAME_WIDTH - 3, GAME_HEIGHT - 3, '', { ...mono, fontSize: '7px', color: '#8d99ae' })
+        .setOrigin(1, 1).setInteractive({ useHandCursor: true });
+      const refresh = () => {
+        const a = cachedAccount();
+        text.setText(a ? `SAVED ONLINE: ${a.label.slice(0, 22)}` : 'SIGN IN TO SAVE ONLINE').setColor(a ? '#52b788' : '#ffd166');
+      };
+      refresh();
+      text.on('pointerdown', () => showAccountDialog(refresh));
+    }
+    this.add.text(3, GAME_HEIGHT - 3, 'F  FULLSCREEN', { ...mono, fontSize: '7px', color: '#8d99ae' })
+      .setOrigin(0, 1).setInteractive({ useHandCursor: true }).on('pointerdown', () => this.scale.toggleFullscreen());
     this.select(0);
 
     const kb = this.input.keyboard!;

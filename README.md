@@ -52,3 +52,20 @@ See `src/game/saveTransfer.ts` and `src/game/saveMerge.ts`; `npm run test:merge`
 - Cars are driven by a simple line-following bot, so the benchmark measures clean-racing pace, not skilled play.
 
 Tools: `npm run check:tracks` validates track layouts; `npm run check:cars` verifies car classes; `npm run check:trackclasses` checks each track's recommended car class against the lap benchmark (`scripts/benchmarkLaps.js` regenerates it); `npm run test:road` stress-tests the endless-road generator (add `--legacy` to see the old, broken one fail).
+
+## Performance
+
+- The corner readout shows the frame rate and the renderer (`WebGL`, or `Canvas` when the browser has no graphics card). **P** hides or shows it.
+- If the frame rate stays under 40 for a few seconds, the game turns on **low effects** by itself (no particles, skid marks, screen shake, speed zoom or vignette). **Q** flips it by hand. Every visit starts with full effects (low effects is not remembered, since a computer's speed changes with battery saver and the like); hiding the readout is remembered.
+- `?renderer=canvas` on the address forces the plain 2D renderer, worth trying on a computer where WebGL is slow.
+- Roads are painted once into textures instead of being redrawn every frame (`bakeGraphics` in `Track.ts`).
+
+## Online accounts (optional Google sign-in)
+
+Players can sign in with Google from the title screen to keep their coins, cars, upgrades and records online and
+use them on any device. Signing in links their existing anonymous account, so leaderboard scores and replays stay
+theirs. The online save is one document per player (`users/{uid}`), merged with the device's save by
+`src/game/cloudMerge.ts` (tested by `npm run test:cloud`; coins use a three-way rule so devices never double-count).
+
+One-time setup: Firebase console > Authentication > Sign-in method > enable **Google**; make sure your hosting
+address is under Authentication > Settings > Authorized domains; then `firebase deploy --only firestore:rules`.

@@ -1,3 +1,4 @@
+import { saveChanged } from './cloudHook';
 import { CARS, MAX_LEVEL, UPGRADES, effectiveStats, getCar, noUpgrades, type CarDef, type CarStats, type Levels, type UpgradeKey } from './cars';
 
 const KEY = 'oversteer.profile.v1';
@@ -34,6 +35,12 @@ function save(): void {
   } catch {
     /* storage unavailable */
   }
+  saveChanged();
+}
+
+/** Forget the in-memory copy so the next read comes from storage (after the online save was merged in). */
+export function reloadProfile(): void {
+  cache = null;
 }
 
 export const getCoins = (): number => profile().coins;

@@ -1,4 +1,4 @@
-import { formatTime, getLocalBests } from '../game/records';
+import { formatTime, getLocalBests, getUploadQueue, markUploaded, queueUpload } from '../game/records';
 import { getName } from '../game/player';
 import { LB_SYNCED_KEY } from '../game/saveMerge';
 import { firebaseConfigured, getFirebase } from './firebase';
@@ -47,7 +47,7 @@ export async function submitScore(board: string, name: string, value: number): P
     /* rank is a nice-to-have */
   }
   cache.delete(board);
-  markSynced(uid, board, best);
+  markUploaded(board, best);
   return { improved, best, rank };
 }
 
@@ -58,15 +58,32 @@ export async function fetchTop(board: string, n = 10): Promise<{ rows: ScoreRow[
   const hit = cache.get(board);
   if (hit && Date.now() - hit.at < 20_000) return { rows: hit.rows, myUid: uid };
 
+  // Fetch extra so the board still fills up after duplicates are dropped.
   const q = fs.query(
     fs.collection(db, 'boards', board, 'scores'),
     fs.orderBy('value', higherIsBetter(board) ? 'desc' : 'asc'),
-    fs.limit(n),
+    fs.limit(n * 5),
   );
   const snap = await fs.getDocs(q);
-  const rows = snap.docs.map((d) => d.data() as ScoreRow);
+  const rows = dedupeByName(snap.docs.map((d) => d.data() as ScoreRow), uid).slice(0, n);
   cache.set(board, { at: Date.now(), rows });
   return { rows, myUid: uid };
+}
+
+/**
+ * One player can have several scores under the same name (a different uid per browser or device).
+ * Rows arrive best-first, so keeping the first row per name keeps that player's top score. If one of the
+ * dropped rows is this player's, the kept row takes their uid so it is still highlighted as theirs.
+ */
+function dedupeByName(rows: ScoreRow[], myUid: string): ScoreRow[] {
+  const kept = new Map<string, ScoreRow>();
+  for (const row of rows) {
+    const key = row.name.trim().toLowerCase();
+    const best = kept.get(key);
+    if (!best) kept.set(key, { ...row });
+    else if (row.uid === myUid) best.uid = myUid;
+  }
+  return [...kept.values()];
 }
 
 // ---------- renaming ----------
@@ -99,38 +116,35 @@ export async function renameEverywhere(name: string): Promise<void> {
 }
 
 // ---------- offline catch-up ----------
-// Scores set without a connection (or when the submit failed) are only in the local records. Remember which
-// bests the leaderboard has confirmed, and post any local best that is better than that once we're online.
+// Runs set without a connection (or when the submit failed) wait in the upload queue in records.ts, which only
+// ever holds runs driven on this device. Best times merged in from another save are not posted from here.
 
-type Synced = { uid?: string; boards: Record<string, number> };
-
-function readSynced(): Synced {
+/**
+ * One-time move from the old bookkeeping (which bests the board had confirmed): queue the local bests it hadn't
+ * confirmed yet, but only if it was tracking this same account, so times copied in from elsewhere stay out.
+ */
+async function migrateSynced(): Promise<void> {
+  let old: { uid?: string; boards?: Record<string, number> } | null = null;
   try {
     const raw = localStorage.getItem(LB_SYNCED_KEY);
-    if (raw) return JSON.parse(raw) as Synced;
+    if (raw === null) return;
+    old = JSON.parse(raw);
   } catch {
     /* storage unavailable or corrupt */
   }
-  return { boards: {} };
-}
-
-function markSynced(uid: string, board: string, value: number): void {
-  const s = readSynced();
-  if (s.uid !== uid) {
-    s.uid = uid;
-    s.boards = {};
+  const { uid } = await getFirebase();
+  if (old?.uid === uid) {
+    for (const { board, value } of getLocalBests()) {
+      const seen = old.boards?.[board];
+      if (seen === undefined || (higherIsBetter(board) ? value > seen : value < seen)) queueUpload(board, value);
+    }
   }
-  s.boards[board] = value;
-  try {
-    localStorage.setItem(LB_SYNCED_KEY, JSON.stringify(s));
-  } catch {
-    /* storage unavailable */
-  }
+  try { localStorage.removeItem(LB_SYNCED_KEY); } catch { /* storage unavailable */ }
 }
 
 let syncing = false;
 
-/** Posts every local best the leaderboard hasn't confirmed yet. Safe to call often; failures just wait for next time. */
+/** Posts every run from this device the leaderboard hasn't confirmed yet. Safe to call often; failures just wait for next time. */
 export async function syncLocalBests(): Promise<void> {
   const name = getName();
   try {
@@ -140,16 +154,12 @@ export async function syncLocalBests(): Promise<void> {
     /* storage unavailable */
   }
   if (syncing || !firebaseConfigured || !name || (typeof navigator !== 'undefined' && navigator.onLine === false)) return;
-  const done = readSynced().boards;
-  const pending = getLocalBests().filter(({ board, value }) => {
-    if ((board === BOARD_ENDLESS || board === BOARD_OVERSTEER) && value < 30) return false; // same cut-off as EndlessScene
-    const seen = done[board];
-    return seen === undefined || (higherIsBetter(board) ? value > seen : value < seen);
-  });
-  if (!pending.length) return;
   syncing = true;
   try {
-    for (const { board, value } of pending) await submitScore(board, name, value);
+    await migrateSynced();
+    const pending = Object.entries(getUploadQueue())
+      .filter(([board, value]) => !((board === BOARD_ENDLESS || board === BOARD_OVERSTEER) && value < 30)); // same cut-off as EndlessScene
+    for (const [board, value] of pending) await submitScore(board, name, value);
   } catch {
     /* offline or rules rejected: try again later */
   } finally {

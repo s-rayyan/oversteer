@@ -53,5 +53,19 @@ service cloud.firestore {
           && d.updatedAt == request.time;
       }
     }
+
+    // Optional online account save: users/{auth uid}. Only its owner can read or write it, and only once
+    // signed in with Google (not as an anonymous player).
+    match /users/{uid} {
+      allow read: if request.auth != null && request.auth.uid == uid;
+      allow create, update: if request.auth != null && request.auth.uid == uid
+        && request.auth.token.firebase.sign_in_provider != 'anonymous'
+        && request.resource.data.keys().hasOnly(['v', 'data', 'updatedAt'])
+        && request.resource.data.v == 1
+        && request.resource.data.data is string
+        && request.resource.data.data.size() <= 100000
+        && request.resource.data.updatedAt == request.time;
+      allow delete: if false;
+    }
   }
 }

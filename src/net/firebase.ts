@@ -1,6 +1,8 @@
+import type { Auth } from 'firebase/auth';
 import type { Firestore } from 'firebase/firestore';
 
 type FirestoreModule = typeof import('firebase/firestore');
+type AuthModule = typeof import('firebase/auth');
 
 const cfg = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY as string | undefined,
@@ -14,8 +16,11 @@ export const firebaseConfigured = Boolean(cfg.apiKey && cfg.projectId && cfg.app
 
 export interface FirebaseCtx {
   db: Firestore;
-  uid: string;
+  /** The signed-in user's id. Read fresh each time: it changes when the player signs in to an account. */
+  readonly uid: string;
   fs: FirestoreModule;
+  auth: Auth;
+  authMod: AuthModule;
 }
 
 let ctx: Promise<FirebaseCtx> | null = null;
@@ -24,16 +29,16 @@ let ctx: Promise<FirebaseCtx> | null = null;
 export function getFirebase(): Promise<FirebaseCtx> {
   if (!firebaseConfigured) return Promise.reject(new Error('Firebase is not configured'));
   ctx ??= (async () => {
-    const [{ initializeApp }, { getAuth, signInAnonymously }, fs] = await Promise.all([
+    const [{ initializeApp }, authMod, fs] = await Promise.all([
       import('firebase/app'),
       import('firebase/auth'),
       import('firebase/firestore'),
     ]);
     const app = initializeApp(cfg);
-    const auth = getAuth(app);
+    const auth = authMod.getAuth(app);
     await auth.authStateReady();
-    const user = auth.currentUser ?? (await signInAnonymously(auth)).user;
-    return { db: fs.getFirestore(app), uid: user.uid, fs };
+    if (!auth.currentUser) await authMod.signInAnonymously(auth);
+    return { db: fs.getFirestore(app), get uid() { return auth.currentUser!.uid; }, fs, auth, authMod };
   })().catch((e) => {
     ctx = null; // allow a retry
     throw e;

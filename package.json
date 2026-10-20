@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "deploy": "npm run build; firebase deploy --only hosting", 
+    "deploy": "npm run build; firebase deploy --only hosting",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
@@ -13,7 +13,8 @@
     "test:road": "node scripts/testEndlessRoad.ts",
     "check:cars": "node scripts/checkCars.ts",
     "benchmark": "node scripts/benchmark.ts",
-    "test:merge": "node scripts/testSaveMerge.ts"
+    "test:merge": "node scripts/testSaveMerge.ts",
+    "test:cloud": "node scripts/testCloudMerge.ts"
   },
   "dependencies": {
     "firebase": "^12.19.0",

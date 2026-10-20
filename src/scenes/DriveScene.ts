@@ -13,6 +13,7 @@ import { Overlay, type OverlayEntry } from '../game/ui';
 import { firebaseConfigured } from '../net/firebase';
 import { submitScore, formatScore, type SubmitResult } from '../net/leaderboard';
 import { HeatMeter } from '../game/HeatMeter';
+import { quality } from '../game/quality';
 
 type KeyName = 'up' | 'down' | 'left' | 'right' | 'w' | 'a' | 's' | 'd' | 'space' | 'shift' | 'x' | 'comma';
 export type DriveState = 'countdown' | 'racing' | 'finished';
@@ -26,8 +27,9 @@ export interface Spawn {
 /** Furthest the speed zoom pulls out; scenes with a screen-sized background must cover GAME_WIDTH / MIN_ZOOM. */
 export const MIN_ZOOM = 0.86;
 const ZOOM_SPEED = 0.11; // zoom-out at top speed
-const SKID_CAP = 1200;
+const SKID_CAP = 600;
 const SKID_LIFE = 9000;
+const SKID_STEPS = 5;
 const CAM_LOOKAHEAD = 0.3; // seconds of travel the camera leads by
 const CAM_STIFFNESS = 8; // higher = tighter follow (per second)
 const CAM_DEAD_X = 60; // the car never strays further than this from screen centre (half-screen is 160x90)
@@ -58,7 +60,7 @@ export abstract class DriveScene extends Phaser.Scene {
   private boostGfx!: Phaser.GameObjects.Graphics;
   protected boost = 0; // 0..1
   private skidGfx!: Phaser.GameObjects.Graphics;
-  private skids: Array<[number, number, number, number]> = []; // x, y, time laid, opacity
+  private skids: Array<[number, number, number, number]> = []; // x, y, time laid, (unused)
   private skidDrawn = 0;
   private sparks!: Phaser.GameObjects.Particles.ParticleEmitter;
   protected wasBoosting = false;
@@ -66,7 +68,6 @@ export abstract class DriveScene extends Phaser.Scene {
   private pendingUi: Phaser.GameObjects.GameObject[] = [];
   private vignette!: Phaser.GameObjects.Image;
   private zoom = 1;
-  private skidsDirty = false;
   private countdown = 3;
   /** Seconds of countdown before the race starts. */
   protected countdownFrom = 3;
@@ -113,6 +114,10 @@ export abstract class DriveScene extends Phaser.Scene {
   /** Leaderboard id for this mode (track id or 'endless'). */
   protected abstract board(): string;
   protected afterUpdate(_dt: number): void {}
+  /** Lets a mode adjust the equipped car's stats (applied before OVERSTEER's boost changes). */
+  protected tuneStats(stats: CarStats): CarStats {
+    return stats;
+  }
 
   create(): void {
     this.state = 'countdown';
@@ -131,7 +136,7 @@ export abstract class DriveScene extends Phaser.Scene {
     this.paidCoins = 0;
     this.wasPad = false;
     this.surface = { rough: false, pad: false, zone: false };
-    this.stats = equippedStats();
+    this.stats = this.tuneStats(equippedStats());
     if (this.autoDrive) {
       // OVERSTEER: a much stronger boost that refills much faster (but it can still run dry).
       this.stats = { ...this.stats, boostSpeed: this.stats.boostSpeed * 1.3, boostCharge: this.stats.boostCharge * 2.5 };
@@ -177,7 +182,20 @@ export abstract class DriveScene extends Phaser.Scene {
     kb.on('keydown-S', () => nav(1));
     kb.on('keydown-ENTER', () => (this.overlay.visible ? this.overlay.activate() : this.respawn()));
     kb.on('keydown-R', () => this.restart());
+    // Progress is written when the tab is hidden or closing, when the window loses focus mid-run, and every few
+    // seconds, so closing the tab can no longer lose the coins and distance of the run in progress.
+    const flush = () => this.autosave();
+    const onHide = () => { if (document.visibilityState === 'hidden') flush(); };
+    window.addEventListener('pagehide', flush);
+    document.addEventListener('visibilitychange', onHide);
+    const autoPause = () => { if (this.state === 'racing' && !this.paused) this.togglePause(); };
+    this.game.events.on(Phaser.Core.Events.BLUR, autoPause);
+    const saver = this.time.addEvent({ delay: 8000, loop: true, callback: flush });
     this.events.once('shutdown', () => {
+      window.removeEventListener('pagehide', flush);
+      document.removeEventListener('visibilitychange', onHide);
+      this.game.events.off(Phaser.Core.Events.BLUR, autoPause);
+      saver.remove();
       kb.removeAllListeners();
       this.settle();
     });
@@ -192,7 +210,7 @@ export abstract class DriveScene extends Phaser.Scene {
     this.keyDebug = this.add.text(GAME_WIDTH / 2, 48, '', { ...text, color: '#9ad1ff' }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(100).setVisible(false);
     kb.on('keydown-K', () => this.keyDebug.setVisible(!this.keyDebug.visible));
     this.coinText = this.add.text(GAME_WIDTH / 2, 4, '', text).setOrigin(0.5, 0).setScrollFactor(0).setDepth(100);
-    this.hint = this.add.text(4, GAME_HEIGHT - 4, this.autoDrive ? 'AUTO THROTTLE + BOOST  X/COMMA handbrake' : 'SPACE/SHIFT boost  X/COMMA handbrake', { ...text, color: '#c9d1e3' })
+    this.hint = this.add.text(4, GAME_HEIGHT - 4, this.autoDrive ? 'AUTO THROTTLE + BOOST  X handbrake  R restart' : 'SPACE boost  X handbrake  R restart', { ...text, color: '#c9d1e3' })
       .setOrigin(0, 1).setScrollFactor(0).setDepth(100);
     this.mini = new MiniMap(this, this.mapStatic());
     this.heatMeter = new HeatMeter(this);
@@ -204,6 +222,8 @@ export abstract class DriveScene extends Phaser.Scene {
       .on('pointerdown', () => this.togglePause());
 
     this.boostGfx = this.add.graphics().setScrollFactor(0).setDepth(100);
+    this.add.text(GAME_WIDTH / 2, GAME_HEIGHT - 28, 'BOOST', { fontFamily: 'monospace', fontSize: '7px', color: '#8d99ae' })
+      .setOrigin(0.5, 0).setScrollFactor(0).setDepth(100);
     this.vignette = this.add.image(0, 0, 'vignette').setOrigin(0).setScrollFactor(0).setDepth(90);
     this.overlay = new Overlay(this);
   }
@@ -239,10 +259,23 @@ export abstract class DriveScene extends Phaser.Scene {
   private updateSpeedFx(dt: number): void {
     const st = this.car.stats;
     const frac = Phaser.Math.Clamp(this.car.speed / (st.maxSpeed * st.boostSpeed), 0, 1);
-    const target = 1 - ZOOM_SPEED * frac;
+    // Low quality: no zoom (a fractional zoom makes the GPU resample the whole screen) and no full-screen vignette.
+    const target = quality.low ? 1 : 1 - ZOOM_SPEED * frac;
     this.zoom += (target - this.zoom) * (1 - Math.exp(-4 * dt));
     this.cameras.main.setZoom(Phaser.Math.Clamp(this.zoom, MIN_ZOOM, 1));
-    this.vignette.setAlpha(0.45 + 0.35 * frac);
+    this.vignette.setVisible(!quality.low).setAlpha(0.45 + 0.35 * frac);
+  }
+
+  /**
+   * Writes the progress that's safe to write mid-run: coins already earned (an unbanked drift chain is left alone,
+   * since it can still be lost on the grass). Cheap and idempotent; modes add their own bests.
+   */
+  protected autosave(): void {
+    if (this.state === 'countdown') return;
+    const owed = Math.floor(this.driftBank + this.modeCoins()) - this.paidCoins;
+    if (owed <= 0) return;
+    this.paidCoins += owed;
+    addCoins(owed);
   }
 
   /** Banks the current drift chain and pays out everything earned so far; returns the coins just added. */
@@ -263,6 +296,10 @@ export abstract class DriveScene extends Phaser.Scene {
     this.driftBank += this.driftChain;
     this.driftChain = 0;
     this.chainTime = 0;
+  }
+
+  protected shake(ms: number, intensity: number): void {
+    if (!quality.low) this.cameras.main.shake(ms, intensity);
   }
 
   protected showFlash(text: string, ms = 1800): void {
@@ -388,19 +425,20 @@ export abstract class DriveScene extends Phaser.Scene {
     this.updateSpeedFx(dt);
     if (boosting && !this.wasBoosting) {
       const p = this.car.point(-8, 0);
-      this.sparks.emitParticleAt(p.x, p.y, 8); // kick of sparks as the boost lights
+      if (!quality.low) this.sparks.emitParticleAt(p.x, p.y, 8); // kick of sparks as the boost lights
     }
     this.wasBoosting = boosting;
     if (boosting) {
       this.boost = drainBoost(this.boost, this.stats, dt);
       const p = this.car.point(-8, 0);
-      this.flame.emitParticleAt(p.x, p.y, 2);
+      if (!quality.low) this.flame.emitParticleAt(p.x, p.y, 2);
     }
     this.effects(off, dt);
     this.pickUpPad(off);
     this.trackDrift(off, dt);
     this.drawBoost(boosting);
-    this.hud.setText(this.hudLines().join('\n'));
+    // The clock text is a canvas that gets re-uploaded to the GPU whenever it changes: refresh it ~15 times a second.
+    if (this.game.getFrame() % 4 === 0) this.hud.setText(this.hudLines().join('\n'));
     if (this.keyDebug.visible) {
       const down = (Object.entries(this.keys) as Array<[string, Phaser.Input.Keyboard.Key]>).filter(([, key]) => key.isDown).map(([name]) => name.toUpperCase());
       this.keyDebug.setText(`KEYS: ${down.join(' ') || '-'}`);
@@ -487,7 +525,7 @@ export abstract class DriveScene extends Phaser.Scene {
     if (now && !this.wasPad && this.state === 'racing') {
       this.boost = Math.min(1, this.boost + this.stats.padGain);
       this.showFlash('BOOST PAD!', 600);
-      this.cameras.main.shake(160, 0.005);
+      this.shake(160, 0.005);
     }
     this.wasPad = now;
   }
@@ -495,30 +533,37 @@ export abstract class DriveScene extends Phaser.Scene {
   private effects(off: boolean, dt: number): void {
     if (off) {
       if (this.car.speed > 25) {
-        if (this.car.speed > 60) this.cameras.main.shake(70, 0.0025); // rumble over the grass
+        if (this.car.speed > 60) this.shake(70, 0.0025); // rumble over the grass
         const p = this.car.point(-7, 0);
-        this.dust.emitParticleAt(p.x, p.y, 1);
+        if (!quality.low) this.dust.emitParticleAt(p.x, p.y, 1);
       }
     } else if (this.slipNow() > DRIFT_SLIP && this.car.speed > DRIFT_MIN_SPEED) {
-      for (const side of [-3, 3]) {
+      for (const side of quality.low ? [] : [-3, 3]) {
         const p = this.car.point(-5, side);
-        this.skids.push([Math.floor(p.x), Math.floor(p.y), this.time.now, Phaser.Math.Clamp(0.2 + this.slipNow() * 0.25, 0.2, 0.55)]);
+        const x = Math.floor(p.x), y = Math.floor(p.y);
+        this.skids.push([x, y, this.time.now, 1]);
+        this.skidGfx.fillStyle(0x14121f, 0.45).fillRect(x, y, 1, 1); // a new mark is drawn straight away...
       }
       if (this.skids.length > SKID_CAP) this.skids.splice(0, this.skids.length - SKID_CAP);
-      this.skidsDirty = true;
       // in a drift zone slip ignores tyre heat and charges boost faster
       if (this.state === 'racing') this.boost = chargeBoost(this.boost, this.slipNow() * (this.surface.zone ? ZONE_CHARGE_MULT : 1), this.stats, dt);
       const rear = this.car.point(-7, 0);
-      this.smoke.emitParticleAt(rear.x, rear.y, 1);
+      if (!quality.low) this.smoke.emitParticleAt(rear.x, rear.y, 1);
     }
 
-    // Marks fade out over SKID_LIFE ms; redraw a few times a second while any remain.
+    // Marks fade out over SKID_LIFE ms. ...and the whole set is repainted only a few times a second (also dropping
+    // the expired ones), in just a few opacity steps, oldest first. Repainting every frame replayed up to
+    // SKID_CAP rectangles 60 times a second for as long as you drifted.
     const now = this.time.now;
-    if (this.skidsDirty || (this.skids.length && now - this.skidDrawn > 150)) {
+    if (this.skids.length && now - this.skidDrawn > 200) {
       while (this.skids.length && now - this.skids[0][2] > SKID_LIFE) this.skids.shift();
       this.skidGfx.clear();
-      for (const [x, y, t, a] of this.skids) this.skidGfx.fillStyle(0x14121f, a * (1 - (now - t) / SKID_LIFE)).fillRect(x, y, 1, 1);
-      this.skidsDirty = false;
+      let step = -1;
+      for (const [x, y, t] of this.skids) {
+        const s = Math.min(SKID_STEPS - 1, Math.floor((1 - (now - t) / SKID_LIFE) * SKID_STEPS));
+        if (s !== step) { this.skidGfx.fillStyle(0x14121f, (0.45 * (s + 1)) / SKID_STEPS); step = s; }
+        this.skidGfx.fillRect(x, y, 1, 1);
+      }
       this.skidDrawn = now;
     }
   }

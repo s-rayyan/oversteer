@@ -1,3 +1,5 @@
+import { saveChanged } from './cloudHook';
+
 const KEY = 'oversteer.records.v1';
 
 interface Store {
@@ -22,6 +24,7 @@ function save(s: Store): void {
   } catch {
     /* storage unavailable */
   }
+  saveChanged();
 }
 
 export function formatTime(sec: number): string {
@@ -49,6 +52,7 @@ export function submitRace(id: string, total: number, bestLap: number): { newBes
   if (newBest) r.best = total;
   if (newLap) r.bestLap = bestLap;
   save(s);
+  if (newBest) queueUpload(id, Math.round(total * 1000));
   return { newBest, newLap };
 }
 
@@ -63,7 +67,52 @@ export function submitEndless(meters: number, mode: DistanceMode = 'endless'): b
   if (meters <= (s[mode] ?? 0)) return false;
   s[mode] = meters;
   save(s);
+  queueUpload(mode, meters);
   return true;
+}
+
+// ---------- runs waiting for the leaderboard ----------
+// Only runs driven on this device go here. Best times that arrive by merging another save (moving out of the
+// hub iframe, signing in to an account) were set, and uploaded, by that other save: re-uploading them would
+// put the same run on the board twice under two accounts. Device-only: never transferred or merged.
+
+export const UPLOAD_QUEUE_KEY = 'oversteer.lbPending';
+
+const higherWins = (board: string) => board === 'endless' || board === 'oversteer';
+
+export function getUploadQueue(): Record<string, number> {
+  try {
+    const raw = localStorage.getItem(UPLOAD_QUEUE_KEY);
+    if (raw) return JSON.parse(raw) as Record<string, number>;
+  } catch {
+    /* storage unavailable or corrupt */
+  }
+  return {};
+}
+
+function writeQueue(q: Record<string, number>): void {
+  try {
+    localStorage.setItem(UPLOAD_QUEUE_KEY, JSON.stringify(q));
+  } catch {
+    /* storage unavailable */
+  }
+}
+
+/** Remembers a run set here so it is posted even if this attempt is offline. */
+export function queueUpload(board: string, value: number): void {
+  const q = getUploadQueue();
+  const old = q[board];
+  if (old === undefined || (higherWins(board) ? value > old : value < old)) q[board] = value;
+  writeQueue(q);
+}
+
+/** The leaderboard now holds `value` (or better) for this board: drop anything queued that it covers. */
+export function markUploaded(board: string, value: number): void {
+  const q = getUploadQueue();
+  const old = q[board];
+  if (old === undefined || (higherWins(board) ? old > value : old < value)) return;
+  delete q[board];
+  writeQueue(q);
 }
 
 /** Every local best as a leaderboard entry (race boards in ms, distance boards in metres). */

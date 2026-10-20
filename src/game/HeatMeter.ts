@@ -13,6 +13,8 @@ export class HeatMeter {
       .setScrollFactor(0)
       .setDepth(100);
 
+    scene.add.text(this.x + this.w, this.y - 5, 'HEAT', { fontFamily: 'monospace', fontSize: '7px', color: '#f4a261' })
+      .setOrigin(1, 0.5).setScrollFactor(0).setDepth(100);
     this.bar = scene.add.graphics().setScrollFactor(0).setDepth(101);
   }
 

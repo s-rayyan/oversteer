@@ -13,3 +13,10 @@ export const SceneKey = {
   Garage: 'GarageScene',
   Tutorial: 'TutorialScene',
 } as const;
+
+/**
+ * The game's home address. Browsers keep a separate save (localStorage) for each address, so a copy of the game
+ * served from any other *.web.app / *.firebaseapp.com address quietly sends its players here with their save
+ * (see moveToHome in saveTransfer.ts). To move the game again: change this, build, deploy to every site (README).
+ */
+export const HOME_HOST = 'playoversteer.web.app';
