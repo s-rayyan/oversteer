@@ -41,6 +41,13 @@ export function decodeFrames(data: string): number[] | null {
   return out;
 }
 
+// Pressing R restarts the race and reloads the scene, which used to download the top replay again every time.
+// Keep it for a few minutes instead (each download is a read, and replays are the biggest documents we have).
+const TOP_TTL_MS = 5 * 60_000;
+const topCache = new Map<string, { at: number; ghost: OnlineGhost | null }>();
+/** Boards whose replay backfill has already been checked this session. */
+const synced = new Set<string>();
+
 /** Writes this player's replay. The security rules only accept it if its time matches their leaderboard score. */
 export async function uploadGhost(board: string, name: string, g: GhostData): Promise<boolean> {
   const data = encodeFrames(g.frames);
@@ -49,6 +56,7 @@ export async function uploadGhost(board: string, name: string, g: GhostData): Pr
   await fs.setDoc(fs.doc(db, 'boards', board, 'ghosts', uid), {
     uid, name, time: Math.round(g.time * 1000), carId: g.carId, data, updatedAt: fs.serverTimestamp(),
   });
+  topCache.delete(board); // it may be the new fastest
   return true;
 }
 
@@ -58,6 +66,9 @@ export async function uploadGhost(board: string, name: string, g: GhostData): Pr
  */
 export async function syncGhost(board: string, name: string, local: GhostData): Promise<void> {
   if (!firebaseConfigured || !name) return;
+  const key = `${board}:${local.time}`;
+  if (synced.has(key)) return;
+  synced.add(key);
   try {
     const { db, uid, fs } = await getFirebase();
     const ms = Math.round(local.time * 1000);
@@ -75,14 +86,18 @@ export async function syncGhost(board: string, name: string, local: GhostData): 
 export async function fetchTopGhost(board: string): Promise<OnlineGhost | null | 'error'> {
   if (!firebaseConfigured) return null;
   if (typeof navigator !== 'undefined' && navigator.onLine === false) return 'error';
+  const hit = topCache.get(board);
+  if (hit && Date.now() - hit.at < TOP_TTL_MS) return hit.ghost;
   try {
     const { db, fs } = await getFirebase();
     const snap = await fs.getDocs(fs.query(fs.collection(db, 'boards', board, 'ghosts'), fs.orderBy('time', 'asc'), fs.limit(1)));
     const d = snap.docs[0]?.data();
-    if (!d) return null;
-    const frames = decodeFrames(String(d.data));
-    if (!frames) return null;
-    return { uid: String(d.uid), name: String(d.name), ghost: { time: (d.time as number) / 1000, carId: String(d.carId), frames } };
+    const frames = d ? decodeFrames(String(d.data)) : null;
+    const ghost = d && frames
+      ? { uid: String(d.uid), name: String(d.name), ghost: { time: (d.time as number) / 1000, carId: String(d.carId), frames } }
+      : null;
+    topCache.set(board, { at: Date.now(), ghost });
+    return ghost;
   } catch {
     return 'error';
   }

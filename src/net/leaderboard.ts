@@ -56,13 +56,14 @@ const cache = new Map<string, { at: number; rows: ScoreRow[] }>();
 export async function fetchTop(board: string, n = 10): Promise<{ rows: ScoreRow[]; myUid: string }> {
   const { db, uid, fs } = await getFirebase();
   const hit = cache.get(board);
-  if (hit && Date.now() - hit.at < 20_000) return { rows: hit.rows, myUid: uid };
+  if (hit && Date.now() - hit.at < 60_000) return { rows: hit.rows, myUid: uid };
 
-  // Fetch extra so the board still fills up after duplicates are dropped.
+  // Fetch a few extra so the board still fills up after duplicates are dropped (each document read counts
+  // against the daily quota, so not too many).
   const q = fs.query(
     fs.collection(db, 'boards', board, 'scores'),
     fs.orderBy('value', higherIsBetter(board) ? 'desc' : 'asc'),
-    fs.limit(n * 5),
+    fs.limit(n * 2),
   );
   const snap = await fs.getDocs(q);
   const rows = dedupeByName(snap.docs.map((d) => d.data() as ScoreRow), uid).slice(0, n);
@@ -143,6 +144,7 @@ async function migrateSynced(): Promise<void> {
 }
 
 let syncing = false;
+let again = false;
 
 /** Posts every run from this device the leaderboard hasn't confirmed yet. Safe to call often; failures just wait for next time. */
 export async function syncLocalBests(): Promise<void> {
@@ -153,16 +155,33 @@ export async function syncLocalBests(): Promise<void> {
   } catch {
     /* storage unavailable */
   }
-  if (syncing || !firebaseConfigured || !name || (typeof navigator !== 'undefined' && navigator.onLine === false)) return;
+  if (!firebaseConfigured || !name || (typeof navigator !== 'undefined' && navigator.onLine === false)) return;
+  if (syncing) {
+    again = true; // a run set while this one is posting still goes up, right after
+    return;
+  }
   syncing = true;
   try {
     await migrateSynced();
     const pending = Object.entries(getUploadQueue())
       .filter(([board, value]) => !((board === BOARD_ENDLESS || board === BOARD_OVERSTEER) && value < 30)); // same cut-off as EndlessScene
-    for (const [board, value] of pending) await submitScore(board, name, value);
+    for (const [board, value] of pending) {
+      try {
+        await submitScore(board, name, value);
+      } catch (e) {
+        // The rules turned this score down for good (e.g. faster than a believable time): stop retrying it on every
+        // start, and carry on with the other boards. Anything else (offline...) stays queued for next time.
+        if ((e as { code?: string }).code === 'permission-denied') markUploaded(board, value);
+        else throw e;
+      }
+    }
   } catch {
-    /* offline or rules rejected: try again later */
+    /* offline: try again later */
   } finally {
     syncing = false;
+    if (again) {
+      again = false;
+      void syncLocalBests();
+    }
   }
 }

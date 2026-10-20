@@ -54,5 +54,14 @@ check('coins never go negative', mergeCloud(save(0, ['hatch']), save(10, ['hatch
 const noisy = { ...save(5, ['hatch']), 'oversteer.ghost.v2.x': 'big', 'oversteer.transferId': 'secret' };
 check('ghosts and bookkeeping are not uploaded', Object.keys(mergeCloud(noisy, null, 0).merged).every((k) => ['oversteer.player', 'oversteer.profile.v1', 'oversteer.records.v1'].includes(k)));
 
+// 10. the online write fails after the device already took the merged save (account.ts then keeps the online
+// balance as the base): the next sync must neither drop this device's coins nor count the online ones twice
+const cloud10 = save(100, ['hatch']);
+const m10 = mergeCloud(save(50, ['hatch']), cloud10, 0); // device now holds 150, the online save still 100
+const retrySame = mergeCloud(m10.merged, cloud10, coinsOf(cloud10));
+check('failed write, retry: 100 online + 50 from this device = 150', retrySame.coins === 150, String(retrySame.coins));
+const retryMoved = mergeCloud(m10.merged, save(130, ['hatch']), coinsOf(cloud10));
+check('failed write, another device added 30 meanwhile: 180', retryMoved.coins === 180, String(retryMoved.coins));
+
 console.log(failures ? `\n${failures} FAILED` : '\nall passed');
 process.exit(failures ? 1 : 0);

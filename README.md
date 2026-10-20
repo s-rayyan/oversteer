@@ -25,6 +25,10 @@ Data model: `boards/{trackId | endless}/scores/{uid}` → `{ uid, name, value, u
 (race = milliseconds, lower wins; endless = metres, higher wins). Players are anonymous Firebase users; the name is
 whatever they typed (12 chars). Rules only allow a player to write their own doc, and only to improve it.
 
+Race times faster than a believable minimum for each track are rejected by the rules, and so are boards that
+aren't real tracks. The minimums are generated: after changing tracks or cars run `npm run check:rules -- --write`,
+then `firebase deploy --only firestore:rules` (`npm run check:rules` fails while they're out of date).
+
 **Caveat:** scores are submitted by the client, so a determined player can post a fake time within the allowed range.
 The rules bound the values but cannot verify a run; real anti-cheat needs server-side replay validation.
 
@@ -37,6 +41,9 @@ click before an embedded page may do that, so if the automatic redirect is block
 The standalone game merges the save with anything already there: best times, faster ghosts, all owned cars, higher
 upgrade levels, and coins from both (each source save's coins are only counted once, however often it's sent).
 See `src/game/saveTransfer.ts` and `src/game/saveMerge.ts`; `npm run test:merge` tests the merge rules.
+A `#save=` link is only accepted when the browser says it came from one of the game's own addresses
+(`SAVE_SENDER_HOSTS` in `src/game/config.ts`), and only carries the name, profile, records, ghosts and settings, so a
+made-up link can't hand out coins or cars.
 
 ## Cars, tracks and balance
 

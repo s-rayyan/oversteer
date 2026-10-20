@@ -6,9 +6,7 @@ import { STEP, RoadGenerator } from '../game/roadGen';
 import { bakeGraphics, decoKey, paintRoad, paintStartLine, roadArea, treeDepth, type RoadPt } from '../game/Track';
 import { THEMES, type Theme } from '../game/tracks';
 import type { Pt } from '../game/spline';
-import { getName } from '../game/player';
-import { BOARD_ENDLESS, BOARD_OVERSTEER, submitScore } from '../net/leaderboard';
-import { firebaseConfigured } from '../net/firebase';
+import { BOARD_ENDLESS, BOARD_OVERSTEER, syncLocalBests } from '../net/leaderboard';
 import { CATCH_RADIUS, PoliceCar } from '../game/Police';
 import { DriveScene, MIN_ZOOM, type Spawn } from './DriveScene';
 
@@ -220,8 +218,9 @@ export class EndlessScene extends DriveScene {
   private saveBest(): void {
     const m = this.meters();
     if (submitEndless(m, this.mode)) this.best = m;
-    // Fire-and-forget; the server keeps only a player's best. Needs a name (asked for in the menu).
-    if (firebaseConfigured && m >= 30 && getName()) void submitScore(this.board(), getName(), m).catch(() => {});
+    // A new best is queued by submitEndless; this posts it (fire-and-forget, needs a name). Pausing or quitting
+    // without beating your best posts nothing, so it costs no database reads.
+    void syncLocalBests();
   }
 
   protected hudLines(): string[] {

@@ -1,5 +1,5 @@
 import { onSaveChanged } from '../game/cloudHook';
-import { CLOUD_KEYS, mergeCloud, pickCloud } from '../game/cloudMerge';
+import { CLOUD_KEYS, coinsOf, mergeCloud, pickCloud } from '../game/cloudMerge';
 import { reloadProfile } from '../game/profile';
 import type { SaveData } from '../game/saveMerge';
 import { decode, encode } from '../game/saveTransfer';
@@ -14,6 +14,11 @@ const LABEL_KEY = 'oversteer.accountLabel'; // shown on the title screen without
 const BASE_KEY = 'oversteer.cloudBase'; // coin balance at the last sync with this account: { uid, coins }
 const SYNCED_KEY = 'oversteer.cloudSyncedAt';
 const DEBOUNCE_MS = 6000;
+/**
+ * Mid-race the save changes every few seconds (coins are autosaved), and every sync is a read and a write. Sync at
+ * most this often while playing; leaving the page or hiding the tab still saves straight away.
+ */
+const MIN_INTERVAL_MS = 120_000;
 
 export interface Account {
   label: string;
@@ -68,16 +73,30 @@ export function syncCloud(): Promise<void> {
       const user = auth.currentUser;
       if (!user || user.isAnonymous) return;
       const ref = fs.doc(db, 'users', user.uid);
-      const snap = await fs.getDoc(ref);
-      let cloud: SaveData | null = null;
-      if (snap.exists()) cloud = (await decode(String(snap.data().data))).data;
+      // A transaction, so two devices syncing at the same moment can't overwrite each other's coins: if the online
+      // save changes between our read and our write, Firestore runs this again with the new one.
+      let coins = 0;
+      await fs.runTransaction(db, async (t) => {
+        const snap = await t.get(ref);
+        const cloud: SaveData | null = snap.exists() ? (await decode(String(snap.data().data))).data : null;
+        const cloudData = cloud ? JSON.stringify(pickCloud(cloud)) : null;
 
-      const { merged, coins } = mergeCloud(readLocal(), cloud, readBase(user.uid));
-      for (const [k, v] of Object.entries(merged)) writeLs(k, v);
+        // Read this device's save only now, after every await, so coins earned while the online save was loading
+        // are in it; then write the result straight back, with no await in between.
+        const result = mergeCloud(readLocal(), cloud, readBase(user.uid));
+        coins = result.coins;
+        for (const [k, v] of Object.entries(result.merged)) writeLs(k, v);
+        reloadProfile();
+        // The device now holds the online coins, but the online save doesn't yet hold the device's. Until the write
+        // below succeeds, record the online balance as the base: if it fails (or this runs again), the next merge
+        // adds this device's coins on top of the online save exactly once instead of dropping or doubling them.
+        writeLs(BASE_KEY, JSON.stringify({ uid: user.uid, coins: cloud ? coinsOf(cloud) : 0 }));
+
+        // Nothing new on either side: skip the write (it costs quota and changes nothing).
+        if (cloudData === JSON.stringify(result.merged)) return;
+        t.set(ref, { v: 1, data: await encode({ id: 'cloud', data: result.merged }), updatedAt: fs.serverTimestamp() });
+      });
       writeLs(BASE_KEY, JSON.stringify({ uid: user.uid, coins }));
-      reloadProfile();
-
-      await fs.setDoc(ref, { v: 1, data: await encode({ id: 'cloud', data: pickCloud(merged) }), updatedAt: fs.serverTimestamp() });
       writeLs(SYNCED_KEY, String(Date.now()));
     } catch (e) {
       console.warn('[account sync]', e);
@@ -129,9 +148,12 @@ export function initAccountSync(): void {
   if (!firebaseConfigured) return;
   let timer: number | undefined;
   onSaveChanged(() => {
-    if (!cachedAccount()) return;
-    window.clearTimeout(timer);
-    timer = window.setTimeout(() => void syncCloud(), DEBOUNCE_MS);
+    if (!cachedAccount() || timer !== undefined) return; // a sync is already booked: it will pick this change up
+    const wait = Math.max(DEBOUNCE_MS, lastSyncedAt() + MIN_INTERVAL_MS - Date.now());
+    timer = window.setTimeout(() => {
+      timer = undefined;
+      void syncCloud();
+    }, wait);
   });
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden' && cachedAccount()) void syncCloud();

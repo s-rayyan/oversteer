@@ -6,7 +6,7 @@
 // the standalone game, which merges the save in before starting (see saveMerge.ts). If the browser
 // blocks that automatic redirect, one click on PLAY does it; if even that is blocked, a new tab or a
 // copyable link carries the save instead.
-import { HOME_HOST } from './config';
+import { HOME_HOST, SAVE_SENDER_HOSTS } from './config';
 import { DEVICE_ONLY_KEYS, IMPORTED_KEY, LB_SYNCED_KEY, MIGRATED_KEY, SAVE_PREFIX, TRANSFER_ID_KEY, hasProgress, mergeSaves, type SaveData } from './saveMerge';
 
 /** True when the game is running inside an iframe (e.g. the game hub). */
@@ -108,14 +108,35 @@ function cleanUrl(): void {
   history.replaceState(null, '', location.pathname);
 }
 
+/** The parts of a save a link may carry. Everything else is this device's own bookkeeping and stays as it is. */
+const TRANSFERABLE = ['oversteer.player', 'oversteer.profile.v1', 'oversteer.records.v1', 'oversteer.ghostmode.v1', 'oversteer.tutorial.v1'];
+const transferable = (k: string) => TRANSFERABLE.includes(k) || k.startsWith('oversteer.ghost.v2.');
+
+/**
+ * Only the game itself hands saves over: the embedded copy or an old address sends the tab here, so the browser
+ * reports that page as the referrer. A `#save=` link pasted in or clicked from anywhere else is ignored, so a
+ * made-up link can't hand out coins and cars.
+ */
+function fromTheGame(): boolean {
+  try {
+    const host = document.referrer ? new URL(document.referrer).hostname : '';
+    return host === location.hostname || SAVE_SENDER_HOSTS.includes(host);
+  } catch {
+    return false;
+  }
+}
+
 /** Call before the game starts: applies a save carried in a `#save=` link from the embedded copy. */
 export async function receiveSave(): Promise<void> {
   if (!location.hash.startsWith('#save=')) return;
-  try {
-    const { id, data } = await decode(location.hash.slice('#save='.length));
-    writeSave(mergeSaves(readSave(), data, id));
-  } catch {
-    /* bad link: ignore */
+  if (fromTheGame()) {
+    try {
+      const { id, data } = await decode(location.hash.slice('#save='.length));
+      const allowed: SaveData = Object.fromEntries(Object.entries(data).filter(([k, v]) => transferable(k) && typeof v === 'string'));
+      writeSave(mergeSaves(readSave(), allowed, String(id)));
+    } catch {
+      /* bad link: ignore */
+    }
   }
   cleanUrl();
 }
@@ -192,18 +213,20 @@ export function showLauncher(playHere: () => void): void {
     }, 1500);
   });
 
-  /** Nothing can leave the iframe: let the player carry the link over by hand. */
-  function showCopyLink(link: string): void {
-    render(`<p style="${css.text}">Your browser blocked opening Oversteer from here. Open this link in a new tab; it carries your save:</p>
-      <textarea readonly rows="4" style="${css.field}">${link}</textarea>
-      <button data-copy style="${css.button}">COPY LINK</button>
-      <button data-here style="${css.small}">play here instead (progress here won't carry over)</button>`);
+  /** Nothing can leave the iframe. A pasted link wouldn't carry the save (see fromTheGame), so say so plainly. */
+  function showCopyLink(_link: string): void {
+    const home = homeOrigin() + '/';
+    render(`<p style="${css.text}">Your browser blocked opening Oversteer from here. You can play it at:</p>
+      <textarea readonly rows="1" style="${css.field}">${home}</textarea>
+      <p style="${css.text}">Progress from this page won't come with you that way.</p>
+      <button data-copy style="${css.button}">COPY ADDRESS</button>
+      <button data-here style="${css.small}">play here instead</button>`);
     const field = root.querySelector('textarea')!;
     field.addEventListener('focus', () => field.select());
     root.querySelector('[data-copy]')!.addEventListener('click', async (e) => {
       const btn = e.currentTarget as HTMLButtonElement;
       try {
-        await navigator.clipboard.writeText(link);
+        await navigator.clipboard.writeText(home);
         btn.textContent = 'COPIED! PASTE IT INTO A NEW TAB';
       } catch {
         field.focus();

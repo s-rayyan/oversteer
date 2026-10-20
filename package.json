@@ -14,7 +14,8 @@
     "check:cars": "node scripts/checkCars.ts",
     "benchmark": "node scripts/benchmark.ts",
     "test:merge": "node scripts/testSaveMerge.ts",
-    "test:cloud": "node scripts/testCloudMerge.ts"
+    "test:cloud": "node scripts/testCloudMerge.ts",
+    "check:rules": "node scripts/checkRules.ts"
   },
   "dependencies": {
     "firebase": "^12.19.0",

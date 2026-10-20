@@ -20,3 +20,11 @@ export const SceneKey = {
  * (see moveToHome in saveTransfer.ts). To move the game again: change this, build, deploy to every site (README).
  */
 export const HOME_HOST = 'playoversteer.web.app';
+
+/**
+ * Every address the game itself is served from (Firebase Hosting gives each site a .web.app and a .firebaseapp.com
+ * name). Only pages on these may hand a save over in a #save= link (see receiveSave in saveTransfer.ts).
+ */
+export const SAVE_SENDER_HOSTS: readonly string[] = [
+  HOME_HOST, 'playoversteer.firebaseapp.com', 'overs-16336.web.app', 'overs-16336.firebaseapp.com',
+];
