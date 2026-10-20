@@ -136,18 +136,22 @@ export function decoKey(theme: string, roll: number): string {
 }
 
 /**
- * Draws a Graphics object once into render textures (tiled, so no texture is bigger than `tile` px) and removes it.
+ * Draws Graphics objects once into render textures (tiled, so no texture is bigger than `tile` px) and removes them.
  * A Graphics object re-runs every one of its drawing commands on every frame, and a road has tens of thousands of
  * them, which is what makes slow computers lag. A texture costs the same to draw however much is painted on it.
- * `area` is the world rectangle that the graphics cover.
+ * Several graphics bake into the same textures, in order (later ones on top). `area` is the world rectangle they
+ * cover. With `saveAs`, each tile's texture is also kept in the texture manager as `${saveAs}${i}` after the scene
+ * ends, so the next run can show it without painting anything (see buildTrack).
  */
 export function bakeGraphics(
   scene: Phaser.Scene,
-  gfx: Phaser.GameObjects.Graphics,
+  gfx: Phaser.GameObjects.Graphics | Phaser.GameObjects.Graphics[],
   area: Phaser.Geom.Rectangle,
   depth: number,
   tile = 1024,
+  saveAs?: string,
 ): Phaser.GameObjects.RenderTexture[] {
+  const layers = Array.isArray(gfx) ? gfx : [gfx];
   const out: Phaser.GameObjects.RenderTexture[] = [];
   const x0 = Math.floor(area.x);
   const y0 = Math.floor(area.y);
@@ -156,11 +160,12 @@ export function bakeGraphics(
   for (let y = y0; y < y1; y += tile) {
     for (let x = x0; x < x1; x += tile) {
       const rt = scene.add.renderTexture(x, y, Math.min(tile, x1 - x), Math.min(tile, y1 - y)).setOrigin(0).setDepth(depth);
-      rt.draw(gfx, -x, -y);
+      for (const g of layers) rt.draw(g, -x, -y);
+      if (saveAs) rt.saveTexture(`${saveAs}${out.length}`);
       out.push(rt);
     }
   }
-  gfx.destroy();
+  layers.forEach((g) => g.destroy());
   return out;
 }
 
@@ -181,6 +186,20 @@ export function treeDepth(y: number): number {
   return 20 + y * 1e-6;
 }
 
+/**
+ * The painted road of the last track built, kept between runs: pressing R (or racing the same track again) shows
+ * these textures instead of repainting thousands of circles and baking them again, which took a noticeable moment
+ * on slow computers. Only one track is kept, so memory doesn't grow as you try different tracks.
+ */
+let bakedTrack: { id: string; tiles: { x: number; y: number }[] } | null = null;
+const bakedKey = (id: string) => `track-${id}-`;
+
+function forgetBakedTrack(scene: Phaser.Scene): void {
+  if (!bakedTrack) return;
+  bakedTrack.tiles.forEach((_, i) => scene.textures.remove(`${bakedKey(bakedTrack!.id)}${i}`));
+  bakedTrack = null;
+}
+
 export function buildTrack(scene: Phaser.Scene, def: TrackDef): BuiltTrack {
   const raw = sampleClosedSpline(def.points, 4, def.roadWidth);
   const flags = surfaceFlags(raw.length, def);
@@ -192,8 +211,10 @@ export function buildTrack(scene: Phaser.Scene, def: TrackDef): BuiltTrack {
   const y0 = Math.min(...ys) - MARGIN;
   const bounds = new Phaser.Geom.Rectangle(x0, y0, Math.max(...xs) + MARGIN - x0, Math.max(...ys) + MARGIN - y0);
 
-  // Deterministic scatter so a track looks the same every run.
+  // Deterministic scatter so a track looks the same every run. The road's asphalt grain has its own stream, so
+  // the scenery comes out the same whether the road is painted fresh or reused from the last run.
   const rng = new Phaser.Math.RandomDataGenerator([def.id]);
+  const roadRng = new Phaser.Math.RandomDataGenerator([def.id, 'road']);
 
   scene.add.tileSprite(bounds.x, bounds.y, bounds.width, bounds.height, `ground-${def.theme}`).setOrigin(0).setDepth(0);
 
@@ -213,7 +234,8 @@ export function buildTrack(scene: Phaser.Scene, def: TrackDef): BuiltTrack {
     scene.add.image(x, y, `patch-${def.theme}`).setDepth(0.3);
   }
 
-  const deco = scene.add.graphics().setDepth(0.5);
+  // Flowers are single pixels: small images of one shared texture (drawn together in one batch) instead of a
+  // texture the size of the whole map, which cost megabytes of video memory for a few hundred dots.
   const flowerColors: Record<string, number[]> = {
     grass: [0xf4a261, 0xe9c46a, 0xf1faee, 0xe76f51],
     desert: [0xa8743a, 0x8c5e2b],
@@ -224,18 +246,23 @@ export function buildTrack(scene: Phaser.Scene, def: TrackDef): BuiltTrack {
     const x = Math.floor(bounds.x + rng.frac() * bounds.width);
     const y = Math.floor(bounds.y + rng.frac() * bounds.height);
     if (nearRoad(x, y, 14)) continue;
-    deco.fillStyle(rng.pick(flowerColors[def.theme])).fillRect(x, y, 1, 1);
+    scene.add.image(x, y, 'px').setOrigin(0).setTint(rng.pick(flowerColors[def.theme])).setDepth(0.5);
   }
 
-  const kerb = scene.add.graphics().setDepth(1);
-  const road = scene.add.graphics().setDepth(1.1);
-  paintRoad(kerb, road, rng, samples, 0, samples.length - 1);
-  paintStartLine(road, samples[0], samples[2], samples[0].half * 2);
-  // Everything above is fixed for the whole race: bake it into textures instead of redrawing it every frame.
-  bakeGraphics(scene, deco, bounds, 0.5);
-  const area = roadArea(samples, 0, samples.length - 1);
-  bakeGraphics(scene, kerb, area, 1);
-  bakeGraphics(scene, road, area, 1.1);
+  // Kerbs and asphalt bake into the same textures (kerbs first): on a closed circuit nothing needs to go between
+  // them, and one layer is a third of the video memory of the separate ones this used to make.
+  const key = bakedKey(def.id);
+  if (bakedTrack?.id === def.id && bakedTrack.tiles.every((_, i) => scene.textures.exists(`${key}${i}`))) {
+    bakedTrack.tiles.forEach((t, i) => scene.add.image(t.x, t.y, `${key}${i}`).setOrigin(0).setDepth(1));
+  } else {
+    forgetBakedTrack(scene);
+    const kerb = scene.add.graphics().setDepth(1);
+    const road = scene.add.graphics().setDepth(1.1);
+    paintRoad(kerb, road, roadRng, samples, 0, samples.length - 1);
+    paintStartLine(road, samples[0], samples[2], samples[0].half * 2);
+    const tiles = bakeGraphics(scene, [kerb, road], roadArea(samples, 0, samples.length - 1), 1, 1024, key);
+    bakedTrack = { id: def.id, tiles: tiles.map((t) => ({ x: t.x, y: t.y })) };
+  }
 
   const trees: Pt[] = [];
   for (let i = 0; i < 90; i++) {

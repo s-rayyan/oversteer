@@ -19,7 +19,8 @@
   },
   "dependencies": {
     "firebase": "^12.19.0",
-    "phaser": "^3.90.0"
+    "phaser": "^3.90.0",
+    "wrangler": "^4.151.3"
   },
   "devDependencies": {
     "typescript": "^5.9.3",

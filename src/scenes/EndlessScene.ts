@@ -3,7 +3,7 @@ import type { CarStats } from '../game/cars';
 import { GAME_HEIGHT, GAME_WIDTH, SceneKey } from '../game/config';
 import { formatClock, formatTime, getEndlessBest, submitEndless, type DistanceMode } from '../game/records';
 import { STEP, RoadGenerator } from '../game/roadGen';
-import { bakeGraphics, decoKey, paintRoad, paintStartLine, roadArea, treeDepth, type RoadPt } from '../game/Track';
+import { decoKey, paintRoad, paintStartLine, roadArea, treeDepth, type RoadPt } from '../game/Track';
 import { THEMES, type Theme } from '../game/tracks';
 import type { Pt } from '../game/spline';
 import { BOARD_ENDLESS, BOARD_OVERSTEER, syncLocalBests } from '../net/leaderboard';
@@ -26,6 +26,8 @@ const POLICE_FAR = 1.4; // ...rising to this when it's far behind, so it always 
 const POLICE_NEAR_GAP = 80; // px at or below which the NEAR multiplier applies
 const POLICE_FAR_GAP = 480; // px at or above which the FAR multiplier applies
 const POLICE_SPAWN_BEHIND = 90; // road samples behind the car
+/** Side of the reusable road textures: big enough for most chunks in one piece (larger ones take several). */
+const TEX = 320;
 
 interface Chunk {
   /** The painted road for this stretch, baked into textures (kerbs and asphalt are separate layers). */
@@ -50,6 +52,11 @@ export class EndlessScene extends DriveScene {
   private groundH = GAME_HEIGHT;
   private best = 0;
   private cops: PoliceCar[] = [];
+  /**
+   * Road textures of chunks that have scrolled away, ready for new ones. Making a new texture means asking the
+   * graphics card for memory, which caused a small hitch every time a chunk appeared; reusing one doesn't.
+   */
+  private texPool: Phaser.GameObjects.RenderTexture[] = [];
   private boostPeak = 0; // OVERSTEER: highest speed reached while boosting this run (px/s)
 
   constructor(key: string = SceneKey.Endless) {
@@ -74,6 +81,7 @@ export class EndlessScene extends DriveScene {
     this.maxIdx = START;
     this.best = getEndlessBest(this.mode);
     this.cops = [];
+    this.texPool = []; // the old ones went with the previous run's scene
     this.boostPeak = 0;
 
     // Oversized so it still covers the screen when the speed zoom pulls the camera out.
@@ -101,7 +109,7 @@ export class EndlessScene extends DriveScene {
     while ((this.nextChunk + 1) * CHUNK + 1 <= this.pts.length) this.buildChunk(this.nextChunk++);
     for (const [k, c] of this.chunks) {
       if ((k + 1) * CHUNK < this.idx - BEHIND) {
-        c.layers.forEach((l) => l.destroy());
+        c.layers.forEach((l) => this.texPool.push(l.setVisible(false)));
         c.trees.forEach((t) => t.destroy());
         this.chunks.delete(k);
       }
@@ -117,7 +125,7 @@ export class EndlessScene extends DriveScene {
     if (i0 <= 10 && i1 >= 12) paintStartLine(road, this.pts[10], this.pts[12], this.pts[10].half * 2);
     // Paint once, then keep only textures: a Graphics object would replay all its commands on every frame.
     const area = roadArea(this.pts, i0, i1);
-    const layers = [...bakeGraphics(this, kerb, area, 1), ...bakeGraphics(this, road, area, 1.1)];
+    const layers = [...this.bake(kerb, area, 1), ...this.bake(road, area, 1.1)];
 
     const trees: Phaser.GameObjects.Image[] = [];
     const lo = Math.max(0, i0 - 150);
@@ -138,6 +146,23 @@ export class EndlessScene extends DriveScene {
       }
     }
     this.chunks.set(k, { layers, trees });
+  }
+
+  /** Paints a Graphics object into pooled textures covering `area`, then removes it (see bakeGraphics in Track.ts). */
+  private bake(gfx: Phaser.GameObjects.Graphics, area: Phaser.Geom.Rectangle, depth: number): Phaser.GameObjects.RenderTexture[] {
+    const out: Phaser.GameObjects.RenderTexture[] = [];
+    const x0 = Math.floor(area.x);
+    const y0 = Math.floor(area.y);
+    for (let y = y0; y < area.bottom; y += TEX) {
+      for (let x = x0; x < area.right; x += TEX) {
+        const rt = (this.texPool.pop() ?? this.add.renderTexture(0, 0, TEX, TEX).setOrigin(0))
+          .setPosition(x, y).setDepth(depth).setVisible(true).clear();
+        rt.draw(gfx, -x, -y);
+        out.push(rt);
+      }
+    }
+    gfx.destroy();
+    return out;
   }
 
   protected updateMode(): boolean {

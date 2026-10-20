@@ -137,6 +137,7 @@ export class BootScene extends Phaser.Scene {
     bake('deco-snow', 16, 19);
 
     rect(0xffffff, 0, 0, 2, 2); bake('smoke', 2, 2);
+    rect(0xffffff, 0, 0, 1, 1); bake('px', 1, 1); // one white pixel, tinted for flowers
     // Particle shapes: a round puff (smoke), a speck (dust) and a diamond spark (boost flame / sparks).
     rect(0xffffff, 1, 0, 3, 5); rect(0xffffff, 0, 1, 5, 3); bake('puff', 5, 5);
     rect(0xffffff, 0, 0, 2, 1); rect(0xffffff, 0, 1, 1, 1); bake('speck', 2, 2);

@@ -69,8 +69,9 @@ export class TitleScene extends Phaser.Scene {
       refresh();
       text.on('pointerdown', () => showAccountDialog(refresh));
     }
-    this.add.text(3, GAME_HEIGHT - 3, 'F  FULLSCREEN', { ...mono, fontSize: '7px', color: '#8d99ae' })
+    const full = this.add.text(3, GAME_HEIGHT - 3, 'F  FULLSCREEN', { ...mono, fontSize: '7px', color: '#8d99ae' })
       .setOrigin(0, 1).setInteractive({ useHandCursor: true }).on('pointerdown', () => this.scale.toggleFullscreen());
+    this.add.text(full.x + full.width + 12, GAME_HEIGHT - 3, 'P  FPS', { ...mono, fontSize: '7px', color: '#8d99ae' }).setOrigin(0, 1);
     this.select(0);
 
     const kb = this.input.keyboard!;
