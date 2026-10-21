@@ -7,7 +7,32 @@ npm install
 npm run dev
 ```
 
-Controls: arrows/WASD drive · SPACE boost (charged by drifting) · R restart · ENTER respawn · ESC menu.
+Controls: arrows/WASD drive · SPACE boost (charged by drifting) · X handbrake · R restart · ENTER respawn · ESC menu · M mute · F fullscreen.
+A gamepad works too: left stick or d-pad steers, triggers drive, A/RB boost, X/B/LB handbrake, Start pauses, Y respawns,
+Back restarts (and it rumbles when you drift, boost or crash).
+
+## What makes it fun
+
+- **Sound** (`src/game/audio.ts`): all synthesised with Web Audio, so there are still no asset files. Engine pitch follows speed,
+  tyres screech with slip, gravel rumbles, a siren swells as a cruiser closes in, and there are call-out jingles. **M** mutes
+  (remembered on this device).
+- **Drift combos:** the live chain shows its multiplier (`DRIFT +42 x2.3`), swells and warms up as it grows, and a banked
+  chain is called out (NICE / GREAT / HUGE / INSANE DRIFT). A chain lost on the grass buzzes and says so.
+- **Endless and OVERSTEER** (`src/game/RoadEvents.ts`): oil slicks (no grip, no drift coins for a moment), traffic cones,
+  roadblocks with a gap, and drift gates that pay more if you slide through them. Police get one **wanted star** per 35 s
+  (faster cruisers in Endless, a fourth cruiser from level 4). A long drift chain **spins the nearest cruiser out**, and a
+  near miss with a cruiser pays a **close call** bonus. Getting busted plays out in slow motion.
+- **Daily road:** the second row of the Endless and OVERSTEER tabs is a road everybody shares today (seed from the UTC date).
+  Its best is kept on this device only, and daily runs never touch the online Endless boards.
+- **Medals:** every circuit has bronze, silver and gold times, shown in the menu and while you race (`src/game/medals.ts`).
+  They are multiples of what the starter Hatchback's benchmark bot drives, generated into `src/game/medalTimes.ts`:
+  after `npm run benchmark -- --write` run `npm run medals -- --write` (`npm run medals` checks it is current). The first
+  time you reach a medal on a track it pays a bonus. Laps show a split against your best lap.
+- **Goals** (`src/game/challenges.ts`, menu key **C**): one-off challenges that pay coins, checked automatically as you drive.
+  Not paid in the tutorial.
+- **Paint shop** (`src/game/cosmetics.ts`, Garage key **P**): paint jobs and tyre-smoke colours for coins. Looks only.
+- Confetti and a banner for new records and new bests; the profile save gained `paints`, `smokes` and `done` lists, merged
+  as unions (`saveMerge.ts`, tested by `npm run test:merge`).
 
 ## Global leaderboard (Firebase)
 

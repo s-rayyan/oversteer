@@ -5,6 +5,9 @@ import { initAccountSync } from './net/account';
 import { syncLocalBests } from './net/leaderboard';
 import { isEmbedded, moveToHome, onOldAddress, receiveSave, showLauncher } from './game/saveTransfer';
 import { BootScene } from './scenes/BootScene';
+import { ChallengesScene } from './scenes/ChallengesScene';
+import { StyleScene } from './scenes/StyleScene';
+import { audio } from './game/audio';
 import { GarageScene } from './scenes/GarageScene';
 import { LeaderboardScene } from './scenes/LeaderboardScene';
 import { MenuScene } from './scenes/MenuScene';
@@ -30,7 +33,7 @@ function start(): void {
       mode: Phaser.Scale.FIT,
       autoCenter: Phaser.Scale.CENTER_BOTH,
     },
-    scene: [BootScene, TitleScene, MenuScene, RaceScene, EndlessScene, OversteerScene, LeaderboardScene, GarageScene, TutorialScene],
+    scene: [BootScene, TitleScene, MenuScene, RaceScene, EndlessScene, OversteerScene, LeaderboardScene, GarageScene, TutorialScene, ChallengesScene, StyleScene],
   });
 
   // Catch up any scores earned while offline, now and whenever the connection returns.
@@ -38,7 +41,12 @@ function start(): void {
   window.addEventListener('keydown', (e) => {
     const t = e.target as HTMLElement | null;
     if ((e.key === 'f' || e.key === 'F') && !e.ctrlKey && !e.metaKey && !e.altKey && !(t && /^(INPUT|TEXTAREA)$/.test(t.tagName))) game.scale.toggleFullscreen();
+    // M mutes or unmutes the sound (the driving scenes show a note).
+    if ((e.key === 'm' || e.key === 'M') && !e.ctrlKey && !e.metaKey && !e.altKey && !(t && /^(INPUT|TEXTAREA)$/.test(t.tagName))) {
+      game.events.emit('mute-changed', audio.toggleMute());
+    }
   });
+  audio.unlock();
 
   addFpsMeter(game);
   initAccountSync(); // keep a signed-in player's save in step with their online account

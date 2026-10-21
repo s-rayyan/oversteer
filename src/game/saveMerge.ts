@@ -15,7 +15,10 @@ export const MIGRATED_KEY = 'oversteer.migratedAt';
 export const LB_SYNCED_KEY = 'oversteer.lbSynced';
 
 /** Things that describe this one device's sign-in or pending chores: never carried to another address or device. */
-export const DEVICE_ONLY_KEYS: readonly string[] = ['oversteer.accountLabel', 'oversteer.cloudSyncedAt', 'oversteer.renamePending', 'oversteer.lbPending'];
+export const DEVICE_ONLY_KEYS: readonly string[] = [
+  'oversteer.accountLabel', 'oversteer.cloudSyncedAt', 'oversteer.renamePending', 'oversteer.lbPending',
+  'oversteer.muted', 'oversteer.daily.v1', // sound switch and today's best distances on the daily road
+];
 
 const PROFILE = 'oversteer.profile.v1';
 const RECORDS = 'oversteer.records.v1';
@@ -27,6 +30,9 @@ interface Profile {
   owned?: string[];
   selected?: string;
   levels?: Record<string, Record<string, number>>;
+  paints?: string[];
+  smokes?: string[];
+  done?: string[];
 }
 interface Records {
   tracks?: Record<string, { best?: number; bestLap?: number }>;
@@ -54,9 +60,14 @@ function mergeProfile(a: Profile, b: Profile, newCoins: number): Profile {
     for (const [k, v] of Object.entries(lv)) out[k] = Math.max(mine[k] ?? 0, v);
     levels[car] = out;
   }
+  // Things you own or have completed are never taken away: the union of both saves (only when either has any).
+  const union = (x?: string[], y?: string[]) => [...new Set([...(x ?? []), ...(y ?? [])])];
+  const sets: Partial<Profile> = {};
+  for (const k of ['paints', 'smokes', 'done'] as const) if (a[k] || b[k]) sets[k] = union(a[k], b[k]);
   return {
     ...b,
     ...a,
+    ...sets,
     // Two separate playthroughs: keep the coins earned in both (only coins not already brought over).
     coins: (a.coins ?? 0) + newCoins,
     owned: [...new Set([...(a.owned ?? []), ...(b.owned ?? [])])],

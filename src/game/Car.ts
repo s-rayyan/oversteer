@@ -12,9 +12,9 @@ export class Car {
   private readonly shadow: Phaser.GameObjects.Image;
   private readonly vel = new Phaser.Math.Vector2();
 
-  constructor(scene: Phaser.Scene, x: number, y: number, heading: number, stats: CarStats, texture: string) {
+  constructor(scene: Phaser.Scene, x: number, y: number, heading: number, stats: CarStats, texture: string, shadowTexture = `${texture}-shadow`) {
     this.phys = new CarPhysics(stats, x, y, heading);
-    this.shadow = scene.add.image(x, y, `${texture}-shadow`).setDepth(9).setAlpha(0.35);
+    this.shadow = scene.add.image(x, y, shadowTexture).setDepth(9).setAlpha(0.35);
     this.sprite = scene.add.image(x, y, texture).setDepth(10);
     this.sync();
   }

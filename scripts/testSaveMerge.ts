@@ -62,5 +62,18 @@ check('corrupt incoming profile leaves current untouched', corrupt['oversteer.pr
 check('hasProgress ignores bookkeeping keys', !hasProgress({ [MIGRATED_KEY]: '1', [IMPORTED_KEY]: '{}', 'oversteer.transferId': 'x' }) && hasProgress(old));
 check('describeSave summarises', describeSave(old) === '300 coins, 2 cars, 2 track records, 2 ghosts', describeSave(old));
 
+// 6. cosmetics and challenges: what you bought or completed on either side is kept, the current paint stays
+const styled = (paints: string[], paint: string, done: string[]): SaveData => ({
+  'oversteer.profile.v1': j({ coins: 10, owned: ['hatch'], selected: 'hatch', levels: {}, paints, paint, smokes: ['stock'], smoke: 'stock', done }),
+});
+const sm = JSON.parse(mergeSaves(styled(['stock', 'gold'], 'gold', ['drift-25']), styled(['stock', 'lime'], 'lime', ['cones-10']), 's1')['oversteer.profile.v1']);
+check('paints from both saves are kept', j(sm.paints.sort()) === j(['gold', 'lime', 'stock']), j(sm.paints));
+check('completed challenges from both saves are kept', j(sm.done.sort()) === j(['cones-10', 'drift-25']), j(sm.done));
+check('the current paint stays the current one', sm.paint === 'gold');
+const oldSave = JSON.parse(mergeSaves(styled(['stock', 'gold'], 'gold', []), old, 's2')['oversteer.profile.v1']);
+check('a save from before cosmetics still merges', oldSave.paints.includes('gold') && oldSave.owned.includes('kart'), j(oldSave));
+const plain = JSON.parse(mergeSaves({ 'oversteer.profile.v1': j({ coins: 1, owned: ['hatch'], selected: 'hatch', levels: {} }) }, { 'oversteer.profile.v1': j({ coins: 1, owned: ['hatch'], selected: 'hatch', levels: {} }) }, 's3')['oversteer.profile.v1']);
+check('saves with no cosmetics get no new fields', plain.paints === undefined && plain.done === undefined, j(plain));
+
 console.log(failures ? `\n${failures} FAILURES` : '\nALL PASSED');
 process.exit(failures ? 1 : 0);

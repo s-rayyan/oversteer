@@ -8,6 +8,10 @@ import { THEMES, type Theme } from '../game/tracks';
 import type { Pt } from '../game/spline';
 import { BOARD_ENDLESS, BOARD_OVERSTEER, syncLocalBests } from '../net/leaderboard';
 import { CATCH_RADIUS, PoliceCar } from '../game/Police';
+import { RoadEvents } from '../game/RoadEvents';
+import { audio } from '../game/audio';
+import type { RunStats } from '../game/challenges';
+import { getDailyBest, submitDaily } from '../game/daily';
 import { DriveScene, MIN_ZOOM, type Spawn } from './DriveScene';
 
 const CHUNK = 48; // samples per rendered chunk
@@ -26,6 +30,14 @@ const POLICE_FAR = 1.4; // ...rising to this when it's far behind, so it always 
 const POLICE_NEAR_GAP = 80; // px at or below which the NEAR multiplier applies
 const POLICE_FAR_GAP = 480; // px at or above which the FAR multiplier applies
 const POLICE_SPAWN_BEHIND = 90; // road samples behind the car
+const STAR_EVERY = 35; // seconds of racing per wanted star (1 to 5)
+const STAR_SPEED = 0.035; // endless: each star above the first makes cruisers this much faster
+const FOURTH_COP_STARS = 4; // from this wanted level a fourth cruiser joins
+const SPIN_SECONDS = 2.4; // how long a cruiser spins out when a long drift shakes it
+const SPIN_RANGE = 240; // px: a cruiser further than this is not affected
+const CLOSE_RADIUS = 22; // px: a cruiser this close (but not touching) is a close call
+const CLOSE_COOLDOWN = 3500; // ms before the same cruiser can give another close call
+const OIL_SECONDS = 1.3;
 /** Side of the reusable road textures: big enough for most chunks in one piece (larger ones take several). */
 const TEX = 320;
 
@@ -58,14 +70,22 @@ export class EndlessScene extends DriveScene {
    */
   private texPool: Phaser.GameObjects.RenderTexture[] = [];
   private boostPeak = 0; // OVERSTEER: highest speed reached while boosting this run (px/s)
+  private roadEvents!: RoadEvents; // oil, cones, roadblocks and gates
+  private daily = false; // the daily road: same seed for everyone today, best kept on this device only
+  private starsShown = 1;
+  private bestAtStart = 0;
+  private bestAnnounced = false;
+  private closeAt = new Map<PoliceCar, number>();
 
   constructor(key: string = SceneKey.Endless) {
     super(key);
     this.restartLabel = 'New track';
   }
 
-  init(data: { seed?: string }): void {
+  init(data: { seed?: string; daily?: boolean }): void {
+    this.daily = !!data.daily;
     this.seed = data.seed ?? Math.random().toString(36).slice(2, 7).toUpperCase();
+    this.restartLabel = this.daily ? 'Retry daily road' : 'New track';
   }
 
   protected setupWorld(): Spawn {
@@ -79,7 +99,12 @@ export class EndlessScene extends DriveScene {
     this.nextChunk = 0;
     this.idx = START;
     this.maxIdx = START;
-    this.best = getEndlessBest(this.mode);
+    this.best = this.daily ? getDailyBest(this.mode) : getEndlessBest(this.mode);
+    this.bestAtStart = this.best;
+    this.bestAnnounced = false;
+    this.starsShown = 1;
+    this.closeAt = new Map();
+    this.roadEvents = new RoadEvents(this, this.seed, CHUNK);
     this.cops = [];
     this.texPool = []; // the old ones went with the previous run's scene
     this.boostPeak = 0;
@@ -111,6 +136,7 @@ export class EndlessScene extends DriveScene {
       if ((k + 1) * CHUNK < this.idx - BEHIND) {
         c.layers.forEach((l) => this.texPool.push(l.setVisible(false)));
         c.trees.forEach((t) => t.destroy());
+        this.roadEvents.drop(k);
         this.chunks.delete(k);
       }
     }
@@ -146,6 +172,7 @@ export class EndlessScene extends DriveScene {
       }
     }
     this.chunks.set(k, { layers, trees });
+    this.roadEvents.build(k, this.pts, i0, i1);
   }
 
   /** Paints a Graphics object into pooled textures covering `area`, then removes it (see bakeGraphics in Track.ts). */
@@ -187,17 +214,57 @@ export class EndlessScene extends DriveScene {
     const cam = this.cameras.main;
     this.ground.tilePositionX = Math.floor(cam.scrollX - (this.groundW - GAME_WIDTH) / 2);
     this.ground.tilePositionY = Math.floor(cam.scrollY - (this.groundH - GAME_HEIGHT) / 2);
+    if (this.state === 'racing') {
+      this.roadEvents.update(this.idx, this.car, this.car.phys.drifting, {
+        oil: () => this.makeSlick(OIL_SECONDS),
+        cone: (x, y) => { this.impact(x, y, 0.92, false); this.stat('cones'); },
+        barrier: (x, y) => this.impact(x, y, 0.4, true),
+        gate: (drifting) => {
+          this.stat('gates');
+          audio.sfx('gate');
+          if (drifting) {
+            this.stat('driftGates');
+            this.bonus(12, 'DRIFT GATE', '#52b788');
+          } else {
+            this.bonus(2, 'GATE', '#8d99ae');
+          }
+        },
+      });
+      this.announceBest();
+    }
     this.updatePolice(dt);
+  }
+
+  /** Wanted level: one more star every STAR_EVERY seconds, up to five. */
+  private stars(): number {
+    return Math.min(5, 1 + Math.floor(this.raceTime / STAR_EVERY));
+  }
+
+  /** The moment you pass your previous best: a banner and confetti (not on a first-ever run). */
+  private announceBest(): void {
+    if (this.bestAnnounced || this.bestAtStart <= 0 || this.meters() <= this.bestAtStart) return;
+    this.bestAnnounced = true;
+    this.showFlash('NEW BEST!', 2000, '#52b788');
+    audio.sfx('best');
+    this.confetti(60);
   }
 
   /** Cruisers join the chase over time; if one reaches the car the run ends. */
   private updatePolice(dt: number): void {
     if (this.state !== 'racing') return;
     if (this.wasBoosting) this.boostPeak = Math.max(this.boostPeak, this.car.speed);
+    const stars = this.stars();
+    if (stars > this.starsShown) {
+      this.starsShown = stars;
+      this.showFlash(`WANTED LEVEL ${stars}!`, 2000, '#e63946');
+      audio.sfx('wanted');
+    }
     const due = this.raceTime >= POLICE_FIRST + this.cops.length * POLICE_EVERY;
-    if (due && this.cops.length < POLICE_MAX) {
+    const maxCops = POLICE_MAX + (stars >= FOURTH_COP_STARS ? 1 : 0);
+    if (due && this.cops.length < maxCops) {
       this.cops.push(new PoliceCar(this, this.pts, Math.max(0, this.idx - POLICE_SPAWN_BEHIND)));
-      this.showFlash('POLICE BEHIND YOU!', 2000);
+      this.showFlash('POLICE BEHIND YOU!', 2000, '#e63946');
+      audio.sfx('wanted');
     }
     for (const cop of this.cops) {
       // Rubber band: the further back a cruiser is, the faster it drives; it eases off as it closes in.
@@ -206,7 +273,14 @@ export class EndlessScene extends DriveScene {
       // In OVERSTEER the band only ever slows a cruiser: its top speed is a hard 90% of your boosted speed.
       const band = Phaser.Math.Linear(POLICE_NEAR, this.mode === 'oversteer' ? 1 : POLICE_FAR, t);
       cop.update(dt, this.time.now, this.pts, this.idx, this.car, this.policeTop() * band);
-      if (gap < CATCH_RADIUS) return this.bust();
+      if (cop.spinning) continue; // a spinning cruiser can't catch you
+      if (gap < CATCH_RADIUS) return this.bust(cop);
+      if (gap < CLOSE_RADIUS && this.time.now - (this.closeAt.get(cop) ?? -Infinity) > CLOSE_COOLDOWN) {
+        this.closeAt.set(cop, this.time.now);
+        this.stat('closeCalls');
+        this.bonus(5, 'CLOSE CALL');
+        audio.sfx('close');
+      }
     }
   }
 
@@ -217,15 +291,46 @@ export class EndlessScene extends DriveScene {
   private policeTop(): number {
     const st = this.car.stats;
     // A boost rarely reaches the stat-sheet cap (the tank runs out first), so OVERSTEER measures the car's real boosted speed.
-    return this.mode === 'oversteer' ? Math.max(this.boostPeak, st.maxSpeed) * POLICE_SPEED_OVERSTEER : st.maxSpeed * POLICE_SPEED;
+    if (this.mode === 'oversteer') return Math.max(this.boostPeak, st.maxSpeed) * POLICE_SPEED_OVERSTEER;
+    // In endless every wanted star makes the cruisers a little faster.
+    return st.maxSpeed * POLICE_SPEED * (1 + STAR_SPEED * (this.stars() - 1));
   }
 
-  private bust(): void {
+  /** A long drift shakes the nearest cruiser: it spins out for a moment, and you get a small bonus. */
+  protected chainReached(): void {
+    let near: PoliceCar | null = null;
+    let nd = SPIN_RANGE;
+    for (const cop of this.cops) {
+      const d = cop.distanceTo(this.car.x, this.car.y);
+      if (d < nd && !cop.spinning) { near = cop; nd = d; }
+    }
+    if (!near || !near.spinOut(SPIN_SECONDS)) return;
+    this.stat('copsShaken');
+    this.bonus(8, 'COP SPUN OUT!', '#4895ef');
+    audio.sfx('spin');
+    this.rumble(0.3, 0.7, 250);
+  }
+
+  protected sirenLevel(): number {
+    let nearest = Infinity;
+    for (const cop of this.cops) nearest = Math.min(nearest, cop.distanceTo(this.car.x, this.car.y));
+    return Phaser.Math.Clamp(1 - (nearest - 40) / 360, 0, 1);
+  }
+
+  protected modeStats(): Partial<RunStats> {
+    return { mode: this.mode, daily: this.daily, meters: this.meters(), stars: this.stars() };
+  }
+
+  private bust(cop: PoliceCar): void {
     const m = this.meters();
     this.shake(400, 0.012);
+    audio.sfx('bust');
+    this.rumble(1, 1, 500);
+    this.slowMo(900);
+    cop.spinOut(1.5);
     this.saveBest(); // the run still counts
     this.settle();
-    this.finish('BUSTED!', ['The police caught you.', `Run ended at ${m} m`, `Best ${this.best} m   Coins +${this.coinsPaid}`]);
+    this.finish('BUSTED!', ['The police caught you.', `Run ended at ${m} m`, `Best ${this.best} m   Coins +${this.coinsPaid}`], 1100);
   }
 
   private meters(): number {
@@ -236,21 +341,29 @@ export class EndlessScene extends DriveScene {
     super.autosave();
     if (this.state === 'racing') {
       const m = this.meters();
-      if (submitEndless(m, this.mode)) this.best = m; // local only: the online post happens on pause/bust/exit
+      if (this.recordBest(m)) this.best = m; // local only: the online post happens on pause/bust/exit
     }
+  }
+
+  /** Stores a distance as a best: today's daily best on the daily road, otherwise the (online) endless best. */
+  private recordBest(m: number): boolean {
+    return this.daily ? submitDaily(m, this.mode) : submitEndless(m, this.mode);
   }
 
   private saveBest(): void {
     const m = this.meters();
-    if (submitEndless(m, this.mode)) this.best = m;
+    if (this.recordBest(m)) this.best = m;
     // A new best is queued by submitEndless; this posts it (fire-and-forget, needs a name). Pausing or quitting
-    // without beating your best posts nothing, so it costs no database reads.
-    void syncLocalBests();
+    // without beating your best posts nothing, so it costs no database reads. The daily road never goes online.
+    if (!this.daily) void syncLocalBests();
   }
 
   protected hudLines(): string[] {
-    const lines = [`${formatClock(this.raceTime)}  ${this.meters()} m`, `BEST ${Math.max(this.best, this.meters())} m`];
-    if (this.cops.length) lines.push(`POLICE x${this.cops.length}`);
+    const lines = [`${formatClock(this.raceTime)}  ${this.meters()} m`, `${this.daily ? 'TODAY' : 'BEST'} ${Math.max(this.best, this.meters())} m`];
+    if (this.cops.length) {
+      const stars = this.stars();
+      lines.push(`POLICE x${this.cops.length}  WANTED ${'*'.repeat(stars)}${'-'.repeat(5 - stars)}`);
+    }
     return lines;
   }
 
@@ -271,7 +384,7 @@ export class EndlessScene extends DriveScene {
     this.settle();
     return {
       title: 'PAUSED',
-      lines: [`${this.mode === 'oversteer' ? 'OVERSTEER' : 'Endless'}  #${this.seed}`, `${formatTime(this.raceTime)}   ${this.meters()} m`, `Best ${this.best} m   Coins +${this.coinsPaid}`],
+      lines: [`${this.mode === 'oversteer' ? 'OVERSTEER' : 'Endless'}  ${this.daily ? 'DAILY ROAD' : '#' + this.seed}`, `${formatTime(this.raceTime)}   ${this.meters()} m`, `Best ${this.best} m   Coins +${this.coinsPaid}`],
     };
   }
 
@@ -286,6 +399,6 @@ export class EndlessScene extends DriveScene {
 
   protected restart(): void {
     this.saveBest();
-    this.scene.restart({});
+    this.scene.restart(this.daily ? { seed: this.seed, daily: true } : {});
   }
 }

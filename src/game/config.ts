@@ -12,6 +12,8 @@ export const SceneKey = {
   Leaderboard: 'LeaderboardScene',
   Garage: 'GarageScene',
   Tutorial: 'TutorialScene',
+  Challenges: 'ChallengesScene',
+  Style: 'StyleScene',
 } as const;
 
 /**

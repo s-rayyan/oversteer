@@ -140,15 +140,15 @@ const CAR_LIST: CarDef[] = [
   },
   {
     id: 'rocket', name: 'Rocket', blurb: 'Absurd top speed. Steering optional.', price: 2500, carClass: 'speedster', color: 0xf1faee, size: [18, 8], stripe: 0xe63946,
-    stats: { ...BASE, maxSpeed: 175, accel: 163, turnRate: 1.8, grip: 2.2, boostSpeed: 1.35, boostCharge: 0.45 },
+    stats: { ...BASE, maxSpeed: 175, accel: 163, turnRate: 1.8, grip: 2.2, boostSpeed: 1.35, boostCharge: 0.6, boostDrain: 0.23 },
   },
   {
     id: 'phantom', name: 'Phantom', blurb: 'Precise and fast. Rewards clean drifts.', price: 3200, carClass: 'gripracer', color: 0x3a0ca3, size: [17, 9], stripe: 0xc77dff,
-    stats: { ...BASE, maxSpeed: 158, accel: 160, turnRate: 2.53, grip: 4.8, boostCharge: 0.66, boostDrain: 0.4 },
+    stats: { ...BASE, maxSpeed: 158, accel: 160, turnRate: 2.53, grip: 4.8, boostCharge: 0.7, boostDrain: 0.265 },
   },
   {
     id: 'comet', name: 'Comet', blurb: 'Almost the best car in the game.', price: 4200, carClass: 'hypercar', color: 0x00b4d8, size: [17, 9], stripe: 0xffffff,
-    stats: { ...BASE, maxSpeed: 147, accel: 129, turnRate: 1.8, grip: 2.45, boostSpeed: 1.15, offRoadCap: 0.3, padGain: 0.2 },
+    stats: { ...BASE, maxSpeed: 147, accel: 129, turnRate: 1.8, grip: 2.45, boostCharge: 0.8, boostDrain: 0.3, boostSpeed: 1.15, offRoadCap: 0.3, padGain: 0.2 },
   },
   {
     id: 'legend', name: 'Legend', blurb: 'The best car in the game. Gold paint included.', price: 6500, carClass: 'hypercar', color: 0xd4af37, size: [18, 9], stripe: 0x14121f,

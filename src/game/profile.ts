@@ -1,5 +1,6 @@
 import { saveChanged } from './cloudHook';
 import { CARS, MAX_LEVEL, UPGRADES, effectiveStats, getCar, noUpgrades, type CarDef, type CarStats, type Levels, type UpgradeKey } from './cars';
+import { PAINTS, SMOKES, getPaintDef, getSmokeDef, type Paint, type SmokeStyle } from './cosmetics';
 
 const KEY = 'oversteer.profile.v1';
 
@@ -8,9 +9,19 @@ interface Profile {
   owned: string[];
   selected: string;
   levels: Record<string, Levels>;
+  /** Paint jobs and smoke colours bought, and the ones in use (cosmetics.ts). */
+  paints: string[];
+  paint: string;
+  smokes: string[];
+  smoke: string;
+  /** Ids of completed challenges (challenges.ts). */
+  done: string[];
 }
 
-const fresh = (): Profile => ({ coins: 0, owned: [CARS[0].id], selected: CARS[0].id, levels: {} });
+const fresh = (): Profile => ({
+  coins: 0, owned: [CARS[0].id], selected: CARS[0].id, levels: {},
+  paints: [PAINTS[0].id], paint: PAINTS[0].id, smokes: [SMOKES[0].id], smoke: SMOKES[0].id, done: [],
+});
 
 let cache: Profile | null = null;
 
@@ -21,6 +32,8 @@ function profile(): Profile {
     if (raw) {
       const p = { ...fresh(), ...(JSON.parse(raw) as Partial<Profile>) };
       if (!p.owned.includes(CARS[0].id)) p.owned.push(CARS[0].id);
+      if (!p.paints.includes(PAINTS[0].id)) p.paints.push(PAINTS[0].id);
+      if (!p.smokes.includes(SMOKES[0].id)) p.smokes.push(SMOKES[0].id);
       return (cache = p);
     }
   } catch {
@@ -87,6 +100,58 @@ export function buyUpgrade(id: string, key: UpgradeKey): boolean {
   if (!p.owned.includes(id) || cost === null || p.coins < cost) return false;
   p.coins -= cost;
   p.levels[id] = { ...getLevels(id), [key]: getLevels(id)[key] + 1 };
+  save();
+  return true;
+}
+
+// ---------- cosmetics ----------
+
+export type StyleKind = 'paint' | 'smoke';
+
+const shelf = (kind: StyleKind): readonly (Paint | SmokeStyle)[] => (kind === 'paint' ? PAINTS : SMOKES);
+
+export function ownsStyle(kind: StyleKind, id: string): boolean {
+  const p = profile();
+  return (kind === 'paint' ? p.paints : p.smokes).includes(id);
+}
+
+export const equippedPaint = (): Paint => getPaintDef(profile().paint);
+export const equippedSmoke = (): SmokeStyle => getSmokeDef(profile().smoke);
+export const equippedStyle = (kind: StyleKind): string => (kind === 'paint' ? profile().paint : profile().smoke);
+
+/** Buys (if needed) and equips a paint job or smoke colour; false when unknown or too expensive. */
+export function buyStyle(kind: StyleKind, id: string): boolean {
+  const item = shelf(kind).find((i) => i.id === id);
+  const p = profile();
+  if (!item) return false;
+  const owned = kind === 'paint' ? p.paints : p.smokes;
+  if (!owned.includes(id)) {
+    if (p.coins < item.price) return false;
+    p.coins -= item.price;
+    owned.push(id);
+  }
+  if (kind === 'paint') p.paint = id;
+  else p.smoke = id;
+  save();
+  return true;
+}
+
+/** Equips something already owned. */
+export function equipStyle(kind: StyleKind, id: string): boolean {
+  return ownsStyle(kind, id) && buyStyle(kind, id);
+}
+
+// ---------- challenges ----------
+
+export const challengeDone = (id: string): boolean => profile().done.includes(id);
+export const challengesDoneCount = (): number => profile().done.length;
+
+/** Marks a challenge complete and pays its reward; false when it was already done. */
+export function completeChallenge(id: string, reward: number): boolean {
+  const p = profile();
+  if (p.done.includes(id)) return false;
+  p.done.push(id);
+  p.coins += Math.floor(reward);
   save();
   return true;
 }

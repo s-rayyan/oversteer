@@ -7,6 +7,7 @@ import { buyCar, buyUpgrade, getCoins, getLevels, owns, selectCar, selectedCar, 
 import { TRACK_BEST } from '../game/trackBest';
 import { TRACKS } from '../game/tracks';
 import { CoinBadge } from '../game/ui';
+import { paintedKey } from '../game/carTexture';
 
 const BAR = { x: 176, w: 64, h: 4 };
 const VISIBLE = 6; // car rows shown at once; the list scrolls
@@ -78,7 +79,11 @@ export class GarageScene extends Phaser.Scene {
     this.add.text(4, GAME_HEIGHT - 8, '< BACK', { ...mono, color: '#ffd166' }).setOrigin(0, 0.5)
       .setInteractive({ useHandCursor: true }).on('pointerdown', () => this.back());
 
+    this.add.text(54, GAME_HEIGHT - 8, 'PAINT SHOP [P]', { ...mono, color: '#9ad1ff' }).setOrigin(0, 0.5)
+      .setInteractive({ useHandCursor: true }).on('pointerdown', () => this.scene.start(SceneKey.Style));
+
     const kb = this.input.keyboard!;
+    kb.on('keydown-P', () => this.scene.start(SceneKey.Style));
     kb.on('keydown-UP', () => this.pick(this.sel - 1));
     kb.on('keydown-DOWN', () => this.pick(this.sel + 1));
     kb.on('keydown-W', () => this.pick(this.sel - 1));
@@ -147,7 +152,7 @@ export class GarageScene extends Phaser.Scene {
 
     const car = CARS[this.sel];
     const lv = owns(car.id) ? getLevels(car.id) : noUpgrades();
-    this.preview.setTexture(`car-${car.id}`);
+    this.preview.setTexture(owns(car.id) ? paintedKey(this, car) : `car-${car.id}`); // owned cars show your paint job
     this.title.setText(car.name);
     this.blurb.setText(car.blurb);
     const cls = CAR_CLASSES[car.carClass];

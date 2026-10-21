@@ -13,6 +13,8 @@ import { getCar } from '../game/cars';
 import { TRACK_BEST } from '../game/trackBest';
 import { TRACK_CLASSES, classifyTrack, type TrackClassId } from '../game/trackClass';
 import { DIFFICULTY_COLOR, GROUPS, TRACKS } from '../game/tracks';
+import { MEDAL_COLOR, MEDAL_NAME, medalFor, medalTimes } from '../game/medals';
+import { dailySeed, getDailyBest } from '../game/daily';
 
 const ENDLESS_TAB = GROUPS.length;
 const OVERSTEER_TAB = GROUPS.length + 1;
@@ -38,6 +40,9 @@ export class MenuScene extends Phaser.Scene {
   private typeTag!: Phaser.GameObjects.Text;
   private driver!: Phaser.GameObjects.Text;
   private ghostChip!: Phaser.GameObjects.Text;
+  private pips: Phaser.GameObjects.Text[] = [];
+  private medalTag!: Phaser.GameObjects.Text;
+  private medalLine!: Phaser.GameObjects.Text;
 
   constructor() {
     super(SceneKey.Menu);
@@ -51,6 +56,7 @@ export class MenuScene extends Phaser.Scene {
     this.tab = lastTab;
     this.row = lastTrack;
     this.rows = [];
+    this.pips = [];
     const mono = { fontFamily: 'monospace', fontSize: '10px', color: '#ffffff' };
 
     this.add.text(GAME_WIDTH / 2, 14, 'OVERSTEER', { ...mono, fontSize: '18px', color: '#ffd166' }).setOrigin(0.5);
@@ -59,6 +65,8 @@ export class MenuScene extends Phaser.Scene {
       .setInteractive({ useHandCursor: true }).on('pointerdown', () => void this.changeName());
     this.updateDriver();
     new CoinBadge(this, 4, 15).set(getCoins());
+    this.add.text(48, 15, 'GOALS [C]', { ...mono, fontSize: '8px', color: '#9ad1ff' })
+      .setInteractive({ useHandCursor: true }).on('pointerdown', () => this.scene.start(SceneKey.Challenges));
     this.add.text(GAME_WIDTH - 4, 15, 'GARAGE [G]', { ...mono, fontSize: '8px', color: '#ffd166' })
       .setOrigin(1, 0).setInteractive({ useHandCursor: true }).on('pointerdown', () => this.scene.start(SceneKey.Garage));
     this.add.text(GAME_WIDTH - 4, 4, 'LEADERBOARD [L]', { ...mono, fontSize: '8px', color: '#ffd166' })
@@ -81,6 +89,7 @@ export class MenuScene extends Phaser.Scene {
         .on('pointerover', () => this.setRow(i))
         .on('pointerdown', () => { this.setRow(i); this.start(); });
       const diff = this.add.text(170, y + 2, '', { ...mono, fontSize: '8px' }).setOrigin(1, 0);
+      this.pips.push(this.add.text(11, y, '', mono));
       this.rows.push({ name, diff });
     }
 
@@ -94,6 +103,9 @@ export class MenuScene extends Phaser.Scene {
     this.info = this.add.text(PREVIEW.x, PREVIEW.y + PREVIEW.h + 5, '', { ...mono, fontSize: '8px', color: '#c9d1e3' });
 
     this.classInfo = this.add.text(PREVIEW.x, PREVIEW.y + PREVIEW.h + 15, '', { ...mono, fontSize: '7px', color: '#ffd166' });
+    // medal earned on this track (corner of the map) and the times that earn each one
+    this.medalTag = this.add.text(PREVIEW.x + PREVIEW.w - 3, PREVIEW.y + 2, '', { ...mono, fontSize: '7px' }).setOrigin(1, 0);
+    this.medalLine = this.add.text(PREVIEW.x, PREVIEW.y + PREVIEW.h + 25, '', { ...mono, fontSize: '7px', color: '#8d99ae' });
     // track type, in the corner of the map preview
     this.typeTag = this.add.text(PREVIEW.x + 3, PREVIEW.y + 2, '', { ...mono, fontSize: '7px' });
     this.add
@@ -112,6 +124,7 @@ export class MenuScene extends Phaser.Scene {
     kb.on('keydown-ENTER', () => this.start());
     kb.on('keydown-L', () => this.openBoard());
     kb.on('keydown-G', () => this.scene.start(SceneKey.Garage));
+    kb.on('keydown-C', () => this.scene.start(SceneKey.Challenges));
     kb.on('keydown-N', () => void this.changeName());
     kb.on('keydown-T', () => this.cycleGhost());
     this.events.once('shutdown', () => kb.removeAllListeners());
@@ -151,7 +164,7 @@ export class MenuScene extends Phaser.Scene {
   }
 
   private setRow(i: number): void {
-    const n = Math.max(1, this.tracksInTab().length);
+    const n = this.tab >= ENDLESS_TAB ? 2 : Math.max(1, this.tracksInTab().length); // endless tabs: random road, daily road
     this.row = (i + n) % n;
     this.refresh();
   }
@@ -160,7 +173,8 @@ export class MenuScene extends Phaser.Scene {
     lastTab = this.tab;
     lastTrack = this.row;
     if (this.tab >= ENDLESS_TAB) {
-      this.scene.start(this.tab === OVERSTEER_TAB ? SceneKey.Oversteer : SceneKey.Endless, {});
+      const key = this.tab === OVERSTEER_TAB ? SceneKey.Oversteer : SceneKey.Endless;
+      this.scene.start(key, this.row === 1 ? { seed: dailySeed(), daily: true } : {});
     } else {
       this.scene.start(SceneKey.Race, { trackId: this.tracksInTab()[this.row].id });
     }
@@ -174,10 +188,12 @@ export class MenuScene extends Phaser.Scene {
     this.blurb.setText(this.tab === ENDLESS_TAB ? 'A road that never stops.' : this.tab === OVERSTEER_TAB ? 'Auto throttle, auto boost.' : GROUPS[this.tab].blurb);
 
     this.rows.forEach((r, i) => {
+      this.pips[i].setText('');
       if (this.tab >= ENDLESS_TAB) {
         const wild = this.tab === OVERSTEER_TAB;
-        r.name.setText(i === 0 ? '> Random track' : '').setColor('#ffd166');
-        r.diff.setText(i === 0 ? (wild ? 'INSANE' : 'INFINITE') : '').setColor(wild ? '#e63946' : '#ffd166');
+        const on = i === this.row;
+        r.name.setText(i === 0 ? `${on ? '> ' : '  '}Random road` : i === 1 ? `${on ? '> ' : '  '}Daily road` : '').setColor(on ? '#ffd166' : '#ffffff');
+        r.diff.setText(i === 0 ? (wild ? 'INSANE' : 'INFINITE') : i === 1 ? 'TODAY ONLY' : '').setColor(i === 1 ? '#9ad1ff' : wild ? '#e63946' : '#ffd166');
         return;
       }
       const t = tracks[i];
@@ -185,18 +201,28 @@ export class MenuScene extends Phaser.Scene {
       const on = i === this.row;
       r.name.setText((on ? '> ' : '  ') + t.name).setColor(on ? '#ffd166' : '#ffffff');
       r.diff.setText(t.difficulty.toUpperCase()).setColor(DIFFICULTY_COLOR[t.difficulty]);
+      const medal = medalFor(t.id, getRecord(t.id).best);
+      this.pips[i].setText('o').setColor(MEDAL_COLOR[medal]).setAlpha(medal ? 1 : 0.5);
     });
 
     this.ghostChip.setText(`GHOST: ${GHOST_MODE_LABEL[getGhostMode()]}`).setVisible(this.tab < ENDLESS_TAB);
     this.preview.clear();
     this.classInfo.setText('');
     this.typeTag.setText('');
+    this.medalTag.setText('');
+    this.medalLine.setText('');
     if (this.tab >= ENDLESS_TAB) {
       const wild = this.tab === OVERSTEER_TAB;
-      this.previewText.setText(wild
-        ? 'OVERSTEER\nAuto throttle and\nauto boost. Drift\nto refill it.\nSteer. Slide.\nSurvive.'
-        : 'Random road,\nstopwatch running.\nIt narrows as\nyou go. How far\ncan you get?');
-      this.info.setText(`BEST ${getEndlessBest(wild ? 'oversteer' : 'endless')} m`);
+      const mode = wild ? 'oversteer' : 'endless';
+      if (this.row === 1) {
+        this.previewText.setText('The daily road.\nSame road for\neveryone today,\nnew one at\nmidnight UTC.\nBest stays here.');
+        this.info.setText(`TODAY'S BEST ${getDailyBest(mode)} m`);
+      } else {
+        this.previewText.setText(wild
+          ? 'OVERSTEER\nAuto throttle and\nauto boost. Drift\nto refill it.\nSteer. Slide.\nSurvive.'
+          : 'Random road,\nstopwatch running.\nIt narrows as\nyou go. Oil,\ncones, roadblocks.');
+        this.info.setText(`BEST ${getEndlessBest(mode)} m`);
+      }
       return;
     }
 
@@ -240,5 +266,12 @@ export class MenuScene extends Phaser.Scene {
 
     const rec = getRecord(t.id);
     this.info.setText(`${t.laps} LAPS   BEST ${rec.best !== undefined ? formatTime(rec.best) : '--:--.---'}`);
+    const have = medalFor(t.id, rec.best);
+    const mt = medalTimes(t.id);
+    this.medalTag.setText(MEDAL_NAME[have]).setColor(MEDAL_COLOR[have]);
+    if (mt) {
+      const mm = (sec: number) => `${Math.floor(sec / 60)}:${String(Math.floor(sec % 60)).padStart(2, '0')}`;
+      this.medalLine.setText(`MEDALS  B ${mm(mt.bronze)}  S ${mm(mt.silver)}  G ${mm(mt.gold)}`);
+    }
   }
 }

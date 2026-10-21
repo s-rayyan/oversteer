@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { CARS } from '../game/cars';
 import { SceneKey } from '../game/config';
+import { bakeCar, bakeCarShadow } from '../game/carTexture';
 
 interface GroundPalette { base: number; light: number; dark: number }
 
@@ -22,32 +23,10 @@ export class BootScene extends Phaser.Scene {
     const rect = (c: number, x: number, y: number, w: number, h: number) => g.fillStyle(c).fillRect(x, y, w, h);
     const bake = (key: string, w: number, h: number) => { g.generateTexture(key, w, h); g.clear(); };
 
-    // One car texture per model, facing +x. Size and stripe colour vary per car.
+    // One car texture per model (in its own colour; paint jobs are made when used, see carTexture.ts).
     for (const c of CARS) {
-      const [w, h] = c.size ?? [16, 9];
-      const body = Phaser.Display.Color.IntegerToColor(c.color);
-      const wheelW = Math.max(2, Math.round(w * 0.19));
-      for (const wx of [Math.round(w * 0.12), Math.round(w * 0.68)]) {
-        rect(0x14121f, wx, 0, wheelW, 1); rect(0x14121f, wx, h - 1, wheelW, 1); // wheels
-      }
-      rect(body.clone().darken(40).color, 1, 1, w - 2, h - 2); // body outline
-      rect(c.color, 2, 2, w - 4, h - 4); // body
-      rect(body.clone().lighten(25).color, 3, 2, w - 6, 1); // roof highlight
-      rect(body.clone().darken(20).color, 3, h - 3, w - 6, 1); // shaded lower panel
-      rect(c.stripe ?? 0xffffff, 2, Math.floor(h / 2), w - 4, 1); // racing stripe
-      const wsX = Math.round(w * 0.5);
-      rect(0x1d3557, wsX, 2, 3, h - 4); // windshield
-      rect(0x457b9d, wsX, 2, 1, h - 4);
-      rect(0x1d3557, Math.round(w * 0.25), 2, 2, h - 4); // rear window
-      rect(body.clone().darken(40).color, wsX, 0, 2, 1); rect(body.clone().darken(40).color, wsX, h - 1, 2, 1); // mirrors
-      rect(0xffd166, w - 2, 2, 1, 1); rect(0xffd166, w - 2, h - 3, 1, 1); // headlights
-      rect(0xfff1b8, w - 1, 2, 1, 1); rect(0xfff1b8, w - 1, h - 3, 1, 1); // headlight glow
-      rect(0xff6b6b, 1, 2, 1, 1); rect(0xff6b6b, 1, h - 3, 1, 1); // tail lights
-      if (w >= 17) rect(0x14121f, 0, 2, 1, h - 4); // rear spoiler on the big cars
-      else { rect(0x8a2b3a, 0, 2, 1, 1); rect(0x8a2b3a, 0, h - 3, 1, 1); } // tail light glow
-      bake(`car-${c.id}`, w, h);
-      rect(0x000000, 2, 1, w - 4, h - 2); rect(0x000000, 1, 2, w - 2, h - 4); // rounded shadow
-      bake(`car-${c.id}-shadow`, w, h);
+      bakeCar(this, c, c.color, `car-${c.id}`);
+      bakeCarShadow(this, c);
     }
     // Police cruiser (17x9, facing +x) in two frames so the light bar can flash red/blue.
     const cruiser = (key: string, left: number, right: number) => {
@@ -135,6 +114,19 @@ export class BootScene extends Phaser.Scene {
       rect(y % 5 < 2 ? 0xf1faee : 0x1f5a3d, 8 - w / 2, y + 1, w, 1);
     }
     bake('deco-snow', 16, 19);
+
+    // Road objects for the endless road: an oil slick, a traffic cone, a roadblock barrier and a gate post.
+    g.fillStyle(0x0b0a14, 0.9).fillEllipse(11, 7, 22, 13).fillEllipse(8, 8, 10, 7).fillEllipse(15, 6, 9, 6);
+    g.fillStyle(0x4895ef, 0.35).fillEllipse(8, 5, 6, 2).fillEllipse(15, 4, 5, 2);
+    bake('oil', 22, 14);
+    rect(0x14121f, 0, 5, 6, 1); rect(0xff7b00, 1, 4, 4, 1); rect(0xff7b00, 2, 1, 2, 3); rect(0xf1faee, 1, 3, 4, 1); rect(0xf1faee, 2, 2, 2, 1);
+    rect(0xff9f1c, 2, 0, 2, 1);
+    bake('cone', 6, 6);
+    rect(0x14121f, 0, 0, 14, 6); rect(0xf1faee, 1, 1, 12, 4);
+    for (const x of [1, 5, 9]) rect(0xe63946, x, 1, 2, 4); // red and white warning stripes
+    bake('barrier', 14, 6);
+    rect(0x14121f, 0, 0, 4, 9); rect(0xffd166, 1, 0, 2, 3); rect(0x8d99ae, 1, 3, 2, 6);
+    bake('post', 4, 9);
 
     rect(0xffffff, 0, 0, 2, 2); bake('smoke', 2, 2);
     rect(0xffffff, 0, 0, 1, 1); bake('px', 1, 1); // one white pixel, tinted for flowers

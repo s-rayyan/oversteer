@@ -13,6 +13,9 @@ import type { Pt } from '../game/spline';
 import { buildTrack, type RoadPt } from '../game/Track';
 import { TRACKS, type TrackDef } from '../game/tracks';
 import { DriveScene, type Spawn } from './DriveScene';
+import { audio } from '../game/audio';
+import type { RunStats } from '../game/challenges';
+import { MEDAL_COLOR, MEDAL_NAME, MEDAL_PAY, medalFor, medalTimes } from '../game/medals';
 
 const WINDOW = 40; // samples searched either side of the last known position
 
@@ -22,6 +25,7 @@ const shortName = (n: string) => n.slice(0, 8).toUpperCase();
 
 /** Circuit race: N laps, lap timing, personal bests. */
 export class RaceScene extends DriveScene {
+  protected calm = true;
   private track!: TrackDef;
   private samples: RoadPt[] = [];
   private flags: SurfaceFlags[] = [];
@@ -32,6 +36,9 @@ export class RaceScene extends DriveScene {
   private lapTimes: number[] = [];
   private bestLap = Infinity;
   private finishPayout = 0;
+  private finished = false; // for the challenge stats
+  private medalWon = 0;
+  private medalGoal: { name: string; color: string; time: number } | null = null;
 
   // Ghosts: your best run, and the fastest uploaded run; plus a recording of this one.
   private mine: GhostRunner | null = null;
@@ -68,7 +75,14 @@ export class RaceScene extends DriveScene {
     this.lapStart = 0;
     this.lapTimes = [];
     this.finishPayout = 0;
-    this.bestLap = getRecord(this.track.id).bestLap ?? Infinity;
+    this.finished = false;
+    this.medalWon = 0;
+    const record = getRecord(this.track.id);
+    this.bestLap = record.bestLap ?? Infinity;
+    // The next medal up from your best time on this track (shown in the corner while you race).
+    const have = medalFor(this.track.id, record.best);
+    const mt = medalTimes(this.track.id);
+    this.medalGoal = mt && have < 3 ? { name: MEDAL_NAME[have + 1], color: MEDAL_COLOR[have + 1], time: [0, mt.bronze, mt.silver, mt.gold][have + 1] } : null;
 
     this.rec = [];
     this.nextRec = 0;
@@ -175,25 +189,48 @@ export class RaceScene extends DriveScene {
     this.lapStart = this.raceTime;
     this.lapTimes.push(lapTime);
     const isBest = lapTime < this.bestLap;
+    const gap = this.bestLap < Infinity ? lapTime - this.bestLap : null; // against your best lap before this one
     if (isBest) this.bestLap = lapTime;
 
     if (k >= this.track.laps) {
       this.finishRace();
     } else {
-      this.showFlash(`LAP ${k}  ${formatTime(lapTime)}${isBest ? '  BEST!' : ''}`);
+      const split = gap === null ? '' : `  ${gap <= 0 ? '-' : '+'}${Math.abs(gap).toFixed(2)}`;
+      this.showFlash(`LAP ${k}  ${formatTime(lapTime)}${split}${isBest ? '  BEST!' : ''}`, 1800, gap !== null && gap > 0 ? '#e63946' : '#52b788');
+      if (isBest) audio.sfx('bank');
     }
   }
 
   private finishRace(): void {
     const bestThisRun = Math.min(...this.lapTimes);
+    const oldMedal = medalFor(this.track.id, getRecord(this.track.id).best);
     const r = submitRace(this.track.id, this.raceTime, bestThisRun);
+    this.finished = true;
+    this.medalWon = medalFor(this.track.id, this.raceTime);
     const lines = [`Laps  ${this.lapTimes.map((t) => t.toFixed(2)).join('  ')}`];
     lines.push(`Total   ${formatTime(this.raceTime)}${r.newBest ? '  NEW RECORD!' : ''}`);
     lines.push(`Best lap ${formatTime(bestThisRun)}${r.newLap ? '  NEW RECORD!' : ''}`);
     const base = RACE_PAY[this.track.difficulty];
-    this.finishPayout = base + (r.newBest ? Math.floor(base / 2) : 0);
+    // The first time you reach a medal on a track pays a bonus for every tier you newly cleared.
+    let medalPay = 0;
+    for (let tier = oldMedal + 1; tier <= this.medalWon; tier++) medalPay += MEDAL_PAY[tier];
+    const mt = medalTimes(this.track.id);
+    if (mt) {
+      const next = this.medalWon < 3 ? `  next ${MEDAL_NAME[this.medalWon + 1]} ${formatClock([0, mt.bronze, mt.silver, mt.gold][this.medalWon + 1])}` : '';
+      lines.push(`${this.medalWon ? `Medal  ${MEDAL_NAME[this.medalWon]}${medalPay ? `  +${medalPay}` : ''}` : 'No medal'}${next}`);
+    }
+    this.finishPayout = base + (r.newBest ? Math.floor(base / 2) : 0) + medalPay;
     this.settle();
     lines.push(`Coins +${this.coinsPaid}  (finish ${this.finishPayout}, drift ${Math.floor(this.driftBank)})`);
+    if (this.medalWon > oldMedal) {
+      audio.sfx('medal');
+      this.showFlash(`${MEDAL_NAME[this.medalWon]} MEDAL!`, 4000, MEDAL_COLOR[this.medalWon]);
+      this.confetti(this.medalWon === 3 ? 110 : 70);
+    } else if (r.newBest) {
+      audio.sfx('best');
+      this.showFlash('NEW RECORD!', 4000, '#52b788');
+      this.confetti(60);
+    }
     if (saveGhostIfBest(this.track.id, { time: this.raceTime, carId: selectedCar().id, frames: this.rec })) {
       lines.push('Ghost saved');
     }
@@ -209,7 +246,12 @@ export class RaceScene extends DriveScene {
   protected hudLines(): string[] {
     const lines = [`LAP ${this.lapNumber()}/${this.track.laps}  ${formatClock(this.raceTime)}`];
     if (this.bestLap < Infinity) lines.push(`BEST ${formatClock(this.bestLap)}`);
+    if (this.medalGoal && !this.finished) lines.push(`${this.medalGoal.name} ${formatClock(this.medalGoal.time)}`);
     return lines;
+  }
+
+  protected modeStats(): Partial<RunStats> {
+    return { mode: 'race', trackId: this.track.id, finished: this.finished, medal: this.medalWon };
   }
 
   protected mapStatic(): Pt[] {

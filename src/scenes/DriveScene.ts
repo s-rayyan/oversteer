@@ -8,12 +8,15 @@ import { getName, setName } from '../game/player';
 import { askName } from '../game/nameDialog';
 import { MiniMap } from '../game/MiniMap';
 import type { Pt } from '../game/spline';
-import { addCoins, equippedStats, selectedCar } from '../game/profile';
+import { addCoins, challengeDone, completeChallenge, equippedSmoke, equippedStats, selectedCar } from '../game/profile';
 import { Overlay, type OverlayEntry } from '../game/ui';
 import { firebaseConfigured } from '../net/firebase';
 import { submitScore, formatScore, type SubmitResult } from '../net/leaderboard';
 import { HeatMeter } from '../game/HeatMeter';
 import { quality } from '../game/quality';
+import { audio } from '../game/audio';
+import { CHALLENGES, freshRun, type Challenge, type RunStats } from '../game/challenges';
+import { paintedKey } from '../game/carTexture';
 
 type KeyName = 'up' | 'down' | 'left' | 'right' | 'w' | 'a' | 's' | 'd' | 'space' | 'shift' | 'x' | 'comma';
 export type DriveState = 'countdown' | 'racing' | 'finished';
@@ -36,6 +39,21 @@ const CAM_DEAD_X = 60; // the car never strays further than this from screen cen
 const CAM_DEAD_Y = 34;
 const DRIFT_COIN_RATE = 6; // coins per second at full slip (before the chain multiplier)
 const DRIFT_BANK_DELAY = 0.5; // seconds of straight driving before a drift chain is banked
+const CHAIN_STEP = 18; // a live drift chain reaches a milestone every this many coins (modes use it, e.g. to spin out a cruiser)
+/** Coins a banked chain must reach for each call-out, with its name and colour. */
+const DRIFT_TIERS = [
+  { min: 6, name: 'NICE DRIFT', color: '#f4a261' },
+  { min: 20, name: 'GREAT DRIFT!', color: '#ffd166' },
+  { min: 45, name: 'HUGE DRIFT!!', color: '#ff9f1c' },
+  { min: 90, name: 'INSANE DRIFT!!!', color: '#ff5d8f' },
+] as const;
+const CONFETTI_COLORS = [0xe63946, 0xffd166, 0x52b788, 0x4895ef, 0xc77dff, 0xf4a261];
+const PAD_DEADZONE = 0.18;
+const PAD_BUTTONS = { a: 0, b: 1, x: 2, y: 3, lb: 4, rb: 5, lt: 6, rt: 7, back: 8, start: 9, up: 12, down: 13 } as const;
+
+interface Rumbler {
+  playEffect?: (type: string, params: { startDelay: number; duration: number; weakMagnitude: number; strongMagnitude: number }) => Promise<unknown>;
+}
 
 /** Shared driving loop: countdown, input, car effects, pause/restart/respawn. */
 export abstract class DriveScene extends Phaser.Scene {
@@ -59,6 +77,20 @@ export abstract class DriveScene extends Phaser.Scene {
   private flame!: Phaser.GameObjects.Particles.ParticleEmitter;
   private boostGfx!: Phaser.GameObjects.Graphics;
   protected boost = 0; // 0..1
+  /** What has happened this run, for challenges (see challenges.ts). Modes add their own through modeStats(). */
+  protected run: RunStats = freshRun();
+  private slow = 1; // time scale for the slow-motion moment on a crash
+  /** Circuit races keep the drift readout low-key; Endless-style modes keep the loud one. */
+  protected calm = false;
+  private noDrift = 0; // seconds left on an oil slick: no drift coins and no boost charge
+  private lastCount = 0;
+  private nextMilestone = CHAIN_STEP;
+  private goalClock = 0;
+  private goalText!: Phaser.GameObjects.Text;
+  private confettiFx!: Phaser.GameObjects.Particles.ParticleEmitter;
+  private padHeld: boolean[] = [];
+  private pad: Gamepad | null = null;
+  private rumbleAt = 0;
   private skidGfx!: Phaser.GameObjects.Graphics;
   private skids: Array<[number, number, number, number]> = []; // x, y, time laid, (unused)
   private skidDrawn = 0;
@@ -114,6 +146,16 @@ export abstract class DriveScene extends Phaser.Scene {
   /** Leaderboard id for this mode (track id or 'endless'). */
   protected abstract board(): string;
   protected afterUpdate(_dt: number): void {}
+  /** The mode's part of the challenge stats (distance, finished, medal...). */
+  protected modeStats(): Partial<RunStats> {
+    return {};
+  }
+  /** A live drift chain just passed another CHAIN_STEP coins. */
+  protected chainReached(_chain: number): void {}
+  /** 0..1 for the siren sound: how close the nearest cruiser is. */
+  protected sirenLevel(): number {
+    return 0;
+  }
   /** Lets a mode adjust the equipped car's stats (applied before OVERSTEER's boost changes). */
   protected tuneStats(stats: CarStats): CarStats {
     return stats;
@@ -135,6 +177,13 @@ export abstract class DriveScene extends Phaser.Scene {
     this.driftBank = 0;
     this.paidCoins = 0;
     this.wasPad = false;
+    this.run = freshRun();
+    this.slow = 1;
+    this.noDrift = 0;
+    this.lastCount = 0;
+    this.nextMilestone = CHAIN_STEP;
+    this.goalClock = 0;
+    this.padHeld = [];
     this.surface = { rough: false, pad: false, zone: false };
     this.stats = this.tuneStats(equippedStats());
     if (this.autoDrive) {
@@ -148,11 +197,12 @@ export abstract class DriveScene extends Phaser.Scene {
     const spawn = this.setupWorld();
 
     this.skidGfx = this.add.graphics().setDepth(2);
-    this.car = new Car(this, spawn.x, spawn.y, spawn.heading, this.stats, `car-${selectedCar().id}`);
+    const def = selectedCar();
+    this.car = new Car(this, spawn.x, spawn.y, spawn.heading, this.stats, paintedKey(this, def), `car-${def.id}-shadow`);
 
     this.smoke = this.add.particles(0, 0, 'puff', {
       lifespan: 450, speed: { min: 4, max: 14 }, scale: { start: 0.5, end: 1.4 },
-      alpha: { start: 0.55, end: 0 }, tint: 0xdfe7ef, emitting: false,
+      alpha: { start: 0.55, end: 0 }, tint: equippedSmoke().tint, emitting: false,
     }).setDepth(11);
     this.dust = this.add.particles(0, 0, 'speck', {
       lifespan: 500, speed: { min: 8, max: 26 }, scale: { start: 1, end: 2.2 }, rotate: { min: 0, max: 360 },
@@ -182,6 +232,9 @@ export abstract class DriveScene extends Phaser.Scene {
     kb.on('keydown-S', () => nav(1));
     kb.on('keydown-ENTER', () => (this.overlay.visible ? this.overlay.activate() : this.respawn()));
     kb.on('keydown-R', () => this.restart());
+    const onMute = (muted: boolean) => this.showFlash(muted ? 'SOUND OFF' : 'SOUND ON', 900);
+    this.game.events.on('mute-changed', onMute);
+    audio.startRun();
     // Progress is written when the tab is hidden or closing, when the window loses focus mid-run, and every few
     // seconds, so closing the tab can no longer lose the coins and distance of the run in progress.
     const flush = () => this.autosave();
@@ -195,6 +248,9 @@ export abstract class DriveScene extends Phaser.Scene {
       window.removeEventListener('pagehide', flush);
       document.removeEventListener('visibilitychange', onHide);
       this.game.events.off(Phaser.Core.Events.BLUR, autoPause);
+      this.game.events.off('mute-changed', onMute);
+      audio.stopRun();
+      audio.setPaused(false);
       saver.remove();
       kb.removeAllListeners();
       this.settle();
@@ -206,11 +262,17 @@ export abstract class DriveScene extends Phaser.Scene {
       .setOrigin(0.5).setScrollFactor(0).setDepth(100);
     this.flash = this.add.text(GAME_WIDTH / 2, 30, '', { ...text, fontSize: '12px', color: '#ffd166', strokeThickness: 3 })
       .setOrigin(0.5).setScrollFactor(0).setDepth(100);
+    this.goalText = this.add.text(GAME_WIDTH / 2, 44, '', { ...text, color: '#9ad1ff', align: 'center' })
+      .setOrigin(0.5, 0).setScrollFactor(0).setDepth(100).setAlpha(0);
+    this.confettiFx = this.add.particles(0, 0, 'px', {
+      lifespan: 2600, speedX: { min: -40, max: 40 }, speedY: { min: 20, max: 90 }, gravityY: 45,
+      scale: { start: 2, end: 2 }, rotate: { min: 0, max: 360 }, tint: CONFETTI_COLORS, emitting: false,
+    }).setScrollFactor(0).setDepth(150);
     // Press K to see which keys the game currently receives (handy for diagnosing keyboard ghosting).
     this.keyDebug = this.add.text(GAME_WIDTH / 2, 48, '', { ...text, color: '#9ad1ff' }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(100).setVisible(false);
     kb.on('keydown-K', () => this.keyDebug.setVisible(!this.keyDebug.visible));
     this.coinText = this.add.text(GAME_WIDTH / 2, 4, '', text).setOrigin(0.5, 0).setScrollFactor(0).setDepth(100);
-    this.hint = this.add.text(4, GAME_HEIGHT - 4, this.autoDrive ? 'AUTO THROTTLE + BOOST  X handbrake  R restart' : 'SPACE boost  X handbrake  R restart', { ...text, color: '#c9d1e3' })
+    this.hint = this.add.text(4, GAME_HEIGHT - 4, this.autoDrive ? 'AUTO THROTTLE + BOOST  X handbrake  R restart  M mute' : 'SPACE boost  X handbrake  R restart  M mute', { ...text, color: '#c9d1e3' })
       .setOrigin(0, 1).setScrollFactor(0).setDepth(100);
     this.mini = new MiniMap(this, this.mapStatic());
     this.heatMeter = new HeatMeter(this);
@@ -292,27 +354,55 @@ export abstract class DriveScene extends Phaser.Scene {
     return this.paidCoins;
   }
 
-  private bankChain(): void {
-    this.driftBank += this.driftChain;
+  /** Banks the drift chain; with `announce` (a chain that ended naturally) it also calls out how good it was. */
+  private bankChain(announce = false): void {
+    const n = this.driftChain;
+    this.driftBank += n;
     this.driftChain = 0;
     this.chainTime = 0;
+    this.nextMilestone = CHAIN_STEP;
+    if (n <= 0) return;
+    this.run.bestChain = Math.max(this.run.bestChain, n);
+    if (!announce || !this.showCoins) return; // practice modes (the tutorial) keep their own on-screen text
+    let tier = -1;
+    DRIFT_TIERS.forEach((t, i) => { if (n >= t.min) tier = i; });
+    if (tier < 0) return;
+    if (this.calm) {
+      this.showFlash(`+${Math.floor(n)}`, 700, '#c9d1e3');
+      return;
+    }
+    this.showFlash(`${DRIFT_TIERS[tier].name}  +${Math.floor(n)}`, 1500, DRIFT_TIERS[tier].color);
+    audio.sfx(tier >= 2 ? 'bankBig' : 'bank');
+    if (tier >= 2) {
+      this.shake(160, 0.005);
+      this.rumble(0.4, 0.5, 200);
+    }
+    if (tier >= 3) this.confetti(30);
   }
 
   protected shake(ms: number, intensity: number): void {
     if (!quality.low) this.cameras.main.shake(ms, intensity);
   }
 
-  protected showFlash(text: string, ms = 1800): void {
-    this.flash.setText(text).setAlpha(1);
+  protected showFlash(text: string, ms = 1800, color = '#ffd166'): void {
+    this.flash.setText(text).setColor(color).setAlpha(1);
     this.tweens.killTweensOf(this.flash);
     this.tweens.add({ targets: this.flash, alpha: 0, delay: ms, duration: 400 });
   }
 
-  /** End of run: the car coasts while the results panel is up. */
-  protected finish(title: string, lines: string[]): void {
+  /** End of run: the car coasts while the results panel is up (it appears after `delay` ms, e.g. for a slow-motion crash). */
+  protected finish(title: string, lines: string[], delay = 0): void {
     this.state = 'finished';
     this.finishCfg = { title, lines: [...lines] };
-    this.showFinish(0);
+    audio.stopRun();
+    const goals = this.checkGoals();
+    if (goals.length === 1) this.finishCfg.lines.push(`GOAL: ${goals[0].title.slice(0, 36)}  +${goals[0].reward}`);
+    else if (goals.length > 1) this.finishCfg.lines.push(`${goals.length} GOALS DONE  +${goals.reduce((n, c) => n + c.reward, 0)} coins`);
+    if (delay <= 0) return this.showFinish(0);
+    const run = this.runId;
+    this.time.delayedCall(delay, () => {
+      if (run === this.runId && this.finishCfg && !this.overlay.visible) this.showFinish(0);
+    });
   }
 
   private showFinish(selected: number): void {
@@ -334,9 +424,9 @@ export abstract class DriveScene extends Phaser.Scene {
     if (!firebaseConfigured) return;
     const run = this.runId;
     const line = (text: string) => {
-      if (run !== this.runId || !this.finishCfg || !this.overlay.visible) return;
+      if (run !== this.runId || !this.finishCfg) return;
       this.finishCfg.lines.push(text);
-      this.showFinish(this.overlay.selected);
+      if (this.overlay.visible) this.showFinish(this.overlay.selected);
     };
     let name = getName();
     if (!name) {
@@ -372,10 +462,12 @@ export abstract class DriveScene extends Phaser.Scene {
     if (this.state === 'finished') return;
     if (this.paused) {
       this.paused = false;
+      audio.setPaused(false);
       this.overlay.hide();
       return;
     }
     this.paused = true;
+    audio.setPaused(true);
     const info = this.pauseInfo();
     this.overlay.show(info.title, [...info.lines, 'SPACE boost   X handbrake   ENTER respawn'], [
       { label: 'Resume', action: () => this.togglePause() },
@@ -385,9 +477,11 @@ export abstract class DriveScene extends Phaser.Scene {
   }
 
   update(_t: number, delta: number): void {
+    this.readPad();
     if (this.paused) return;
-    const dt = Math.min(delta, 50) / 1000;
+    const dt = (Math.min(delta, 50) / 1000) * this.slow;
     const k = this.keys;
+    const pad = this.pad;
 
     let throttle = 0;
     let steer = 0;
@@ -397,24 +491,52 @@ export abstract class DriveScene extends Phaser.Scene {
       throttle = this.axis([k.down, k.s], [k.up, k.w]);
       steer = this.axis([k.left, k.a], [k.right, k.d]);
       boosting = (k.space.isDown || k.shift.isDown) && this.boost > 0;
+      handbrake = k.x.isDown || k.comma.isDown;
+      if (pad) {
+        // A gamepad works alongside the keyboard: left stick or d-pad steers, triggers drive, A / RB boost, X / B / LB handbrake.
+        const stick = Math.abs(pad.axes[0] ?? 0) > PAD_DEADZONE ? pad.axes[0] : 0;
+        const dpad = (pad.buttons[15]?.pressed ? 1 : 0) - (pad.buttons[14]?.pressed ? 1 : 0);
+        if (!steer) steer = dpad || stick;
+        const trig = (pad.buttons[PAD_BUTTONS.rt]?.value ?? 0) - (pad.buttons[PAD_BUTTONS.lt]?.value ?? 0);
+        if (!throttle) throttle = trig;
+        if (this.padDown(PAD_BUTTONS.a) || this.padDown(PAD_BUTTONS.rb)) boosting = this.boost > 0;
+        if (this.padDown(PAD_BUTTONS.x) || this.padDown(PAD_BUTTONS.b) || this.padDown(PAD_BUTTONS.lb)) handbrake = true;
+      }
       if (this.autoDrive) {
         // Throttle is held for you, and boost fires whenever there's any in the tank.
         throttle = 1;
         boosting = this.boost > 0;
       }
-      handbrake = k.x.isDown || k.comma.isDown;
       this.raceTime += dt;
+      this.goalClock += dt;
+      if (this.goalClock >= 1) {
+        this.goalClock = 0;
+        this.checkGoals();
+      }
     } else if (this.state === 'countdown') {
       this.countdown -= dt;
       if (this.countdown <= 0) {
         this.state = 'racing';
         this.raceTime = 0;
         this.banner.setText('GO!');
+        audio.sfx('go');
         this.tweens.add({ targets: this.hint, alpha: 0, delay: 5000, duration: 800 }); // hints fade once you're racing
         this.time.delayedCall(700, () => this.banner.setText(''));
       } else {
         this.banner.setText(String(Math.ceil(this.countdown)));
+        const n = Math.ceil(this.countdown);
+        if (n !== this.lastCount) {
+          this.lastCount = n;
+          audio.sfx('tick');
+        }
       }
+    }
+
+    if (this.noDrift > 0) {
+      // An oil slick: the tyres stay greasy until the timer runs out, then grip comes back quickly.
+      this.noDrift -= dt;
+      this.car.heat = Math.max(this.car.heat, 0.9);
+      if (this.noDrift <= 0) this.car.heat = Math.min(this.car.heat, 0.45);
     }
 
     const off = this.updateMode(dt);
@@ -426,6 +548,8 @@ export abstract class DriveScene extends Phaser.Scene {
     if (boosting && !this.wasBoosting) {
       const p = this.car.point(-8, 0);
       if (!quality.low) this.sparks.emitParticleAt(p.x, p.y, 8); // kick of sparks as the boost lights
+      audio.sfx('boost');
+      this.rumble(0.6, 0.3, 160);
     }
     this.wasBoosting = boosting;
     if (boosting) {
@@ -437,6 +561,17 @@ export abstract class DriveScene extends Phaser.Scene {
     this.pickUpPad(off);
     this.trackDrift(off, dt);
     this.drawBoost(boosting);
+    if (this.state !== 'finished') {
+      const st = this.car.stats;
+      audio.drive({
+        speed: this.car.speed / st.maxSpeed,
+        throttle: Math.max(0, throttle),
+        boosting,
+        slip: off ? 0 : this.slipNow(),
+        rough: off || this.car.rough,
+        siren: this.sirenLevel(),
+      });
+    }
     // The clock text is a canvas that gets re-uploaded to the GPU whenever it changes: refresh it ~15 times a second.
     if (this.game.getFrame() % 4 === 0) this.hud.setText(this.hudLines().join('\n'));
     if (this.keyDebug.visible) {
@@ -448,30 +583,170 @@ export abstract class DriveScene extends Phaser.Scene {
     this.afterUpdate(dt);
   }
 
+  // ---------- gamepad ----------
+
+  /** Reads the first connected gamepad and handles the buttons that act once per press (menus, pause, respawn). */
+  private readPad(): void {
+    const list = typeof navigator.getGamepads === 'function' ? navigator.getGamepads() : [];
+    this.pad = null;
+    for (const p of list) if (p && p.connected) { this.pad = p; break; }
+    const edge = (i: number): boolean => {
+      const now = !!this.pad?.buttons[i]?.pressed;
+      const was = this.padHeld[i] ?? false;
+      this.padHeld[i] = now;
+      return now && !was;
+    };
+    const start = edge(PAD_BUTTONS.start), a = edge(PAD_BUTTONS.a), y = edge(PAD_BUTTONS.y);
+    const back = edge(PAD_BUTTONS.back), up = edge(PAD_BUTTONS.up), down = edge(PAD_BUTTONS.down);
+    if (!this.pad) return;
+    if (start) this.togglePause();
+    if (back) this.restart();
+    if (this.overlay.visible) {
+      if (up) this.overlay.move(-1);
+      if (down) this.overlay.move(1);
+      if (a) this.overlay.activate();
+    } else if (y && this.state === 'racing') {
+      this.respawn();
+    }
+  }
+
+  private padDown(i: number): boolean {
+    return !!this.pad?.buttons[i]?.pressed;
+  }
+
+  /** Controller rumble (strong = low rumble, weak = buzz), when a gamepad that can do it is connected. */
+  protected rumble(strong: number, weak: number, ms: number): void {
+    const act = (this.pad as unknown as { vibrationActuator?: Rumbler } | null)?.vibrationActuator;
+    if (!act?.playEffect) return;
+    try {
+      void act.playEffect('dual-rumble', { startDelay: 0, duration: ms, weakMagnitude: weak, strongMagnitude: strong })?.catch?.(() => undefined);
+    } catch {
+      /* rumble is a bonus: ignore pads that refuse */
+    }
+  }
+
   /** Drift chains earn coins; they're banked after a short straight, and lost if you touch the grass. */
   private trackDrift(off: boolean, dt: number): void {
     if (this.state === 'racing') {
       const slip = this.slipNow();
-      const sliding = !off && slip > DRIFT_SLIP && this.car.speed > DRIFT_MIN_SPEED;
+      const sliding = !off && this.noDrift <= 0 && slip > DRIFT_SLIP && this.car.speed > DRIFT_MIN_SPEED;
       if (sliding) {
         this.chainTime += dt;
-        this.driftChain += slip * dt * DRIFT_COIN_RATE * (1 + this.chainTime * 0.4);
+        this.driftChain += slip * dt * DRIFT_COIN_RATE * this.multiplier();
         this.slideIdle = 0;
+        if (this.driftChain >= this.nextMilestone) {
+          this.nextMilestone += CHAIN_STEP;
+          this.chainReached(this.driftChain);
+        }
+        if (this.time.now - this.rumbleAt > 110) {
+          this.rumbleAt = this.time.now;
+          this.rumble(0.1, Math.min(0.6, 0.15 + slip), 130);
+        }
       } else if (off && this.driftChain > 0) {
         this.driftChain = 0;
         this.chainTime = 0;
+        this.nextMilestone = CHAIN_STEP;
         this.lostTimer = 0.8;
+        audio.sfx('lost');
+        this.rumble(0.5, 0.2, 200);
       } else if (this.driftChain > 0 && (this.slideIdle += dt) > DRIFT_BANK_DELAY) {
-        this.bankChain();
+        this.bankChain(true);
       }
     }
     this.lostTimer = Math.max(0, this.lostTimer - dt);
 
     const total = Math.floor(this.driftBank + this.modeCoins());
-    if (this.driftChain >= 1) this.coinText.setText(`DRIFT +${Math.floor(this.driftChain)}`).setColor('#f4a261');
-    else if (this.lostTimer > 0) this.coinText.setText('DRIFT LOST').setColor('#e63946');
-    else this.coinText.setText(total > 0 ? `COINS +${total}` : '').setColor('#ffd166');
+    if (this.driftChain >= 1) {
+      // The multiplier grows the longer the slide lasts; the text swells and warms up with it.
+      const mult = this.multiplier();
+      if (this.calm) {
+        this.coinText.setText(`+${Math.floor(this.driftChain)}`).setColor('#c9d1e3').setScale(1);
+        if (!this.showCoins) this.coinText.setText('');
+        return;
+      }
+      const hot = mult >= 3.5 ? '#ff5d8f' : mult >= 2.5 ? '#ff9f1c' : mult >= 1.5 ? '#ffd166' : '#f4a261';
+      this.coinText.setText(`DRIFT +${Math.floor(this.driftChain)}  x${mult.toFixed(1)}`).setColor(hot).setScale(1 + Math.min(0.45, this.chainTime * 0.07));
+    } else if (this.lostTimer > 0) {
+      this.coinText.setText('DRIFT LOST').setColor('#e63946').setScale(1);
+    } else {
+      this.coinText.setText(total > 0 ? `COINS +${total}` : '').setColor('#ffd166').setScale(1);
+    }
     if (!this.showCoins) this.coinText.setText('');
+  }
+
+  /** Drift coin multiplier for the chain in progress (1 at the start, +0.4 per second of sliding). */
+  private multiplier(): number {
+    return 1 + this.chainTime * 0.4;
+  }
+
+  /** Adds coins for a stunt (a close call, a gate) on top of the drift coins, with a call-out. */
+  protected bonus(coins: number, label: string, color = '#9ad1ff'): void {
+    this.driftBank += coins;
+    this.showFlash(`${label} +${coins}`, 1100, color);
+  }
+
+  /** Oil slick: the tyres lose their grip and the car kicks sideways for a moment. */
+  protected makeSlick(seconds: number): void {
+    this.noDrift = seconds;
+    this.car.heat = 1;
+    this.car.phys.heading += (Math.random() - 0.5) * 0.9;
+    this.showFlash('OIL!', 900, '#4895ef');
+    audio.sfx('oil');
+    this.shake(200, 0.004);
+    this.rumble(0.3, 0.8, 300);
+  }
+
+  /** A collision: keeps `keep` of the speed, throws sparks and shakes the screen. */
+  protected impact(x: number, y: number, keep: number, big: boolean): void {
+    this.car.phys.vx *= keep;
+    this.car.phys.vy *= keep;
+    if (!quality.low) this.sparks.emitParticleAt(x, y, big ? 14 : 5);
+    this.shake(big ? 220 : 90, big ? 0.009 : 0.004);
+    audio.sfx(big ? 'crash' : 'hit');
+    this.rumble(big ? 1 : 0.4, big ? 0.6 : 0.2, big ? 300 : 110);
+  }
+
+  /** A burst of confetti across the whole screen. */
+  protected confetti(count = 70): void {
+    if (quality.low) return;
+    for (let i = 0; i < count; i++) this.confettiFx.emitParticleAt(Math.random() * GAME_WIDTH, -4 - Math.random() * 20);
+  }
+
+  /** Slows the game to `factor` of normal speed for `ms` of real time (a crash). */
+  protected slowMo(ms: number, factor = 0.25): void {
+    this.slow = factor;
+    const run = this.runId;
+    this.time.delayedCall(ms, () => {
+      if (run === this.runId) this.slow = 1;
+    });
+  }
+
+  /** Records a stunt for the challenge stats. */
+  protected stat(key: 'gates' | 'driftGates' | 'copsShaken' | 'closeCalls' | 'cones', n = 1): void {
+    this.run[key] += n;
+  }
+
+  private statsNow(): RunStats {
+    return { ...this.run, carId: selectedCar().id, seconds: this.raceTime, ...this.modeStats() };
+  }
+
+  /** Completes (and pays) any challenge the current run has met; returns the ones just completed. */
+  protected checkGoals(): Challenge[] {
+    if (!this.showCoins) return []; // practice modes pay nothing
+    const s = this.statsNow();
+    const got: Challenge[] = [];
+    for (const c of CHALLENGES) {
+      if (challengeDone(c.id) || !c.test(s)) continue;
+      if (completeChallenge(c.id, c.reward)) got.push(c);
+    }
+    if (got.length && this.goalText.active) {
+      this.goalText.setText(got.map((c) => `CHALLENGE: ${c.title}  +${c.reward}`).join('\n')).setAlpha(1);
+      this.tweens.killTweensOf(this.goalText);
+      this.tweens.add({ targets: this.goalText, alpha: 0, delay: 3200, duration: 500 });
+      audio.sfx('goal');
+      this.confetti(40);
+    }
+    return got;
   }
 
   /**
@@ -526,6 +801,8 @@ export abstract class DriveScene extends Phaser.Scene {
       this.boost = Math.min(1, this.boost + this.stats.padGain);
       this.showFlash('BOOST PAD!', 600);
       this.shake(160, 0.005);
+      audio.sfx('pad');
+      this.rumble(0.5, 0.4, 180);
     }
     this.wasPad = now;
   }
@@ -546,7 +823,7 @@ export abstract class DriveScene extends Phaser.Scene {
       }
       if (this.skids.length > SKID_CAP) this.skids.splice(0, this.skids.length - SKID_CAP);
       // in a drift zone slip ignores tyre heat and charges boost faster
-      if (this.state === 'racing') this.boost = chargeBoost(this.boost, this.slipNow() * (this.surface.zone ? ZONE_CHARGE_MULT : 1), this.stats, dt);
+      if (this.state === 'racing' && this.noDrift <= 0) this.boost = chargeBoost(this.boost, this.slipNow() * (this.surface.zone ? ZONE_CHARGE_MULT : 1), this.stats, dt);
       const rear = this.car.point(-7, 0);
       if (!quality.low) this.smoke.emitParticleAt(rear.x, rear.y, 1);
     }
