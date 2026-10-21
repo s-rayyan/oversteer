@@ -1,4 +1,7 @@
 import { cachedAccount, describeAuthError, lastSyncedAt, signInWithGoogle, signOutAccount, syncCloud } from '../net/account';
+import { firebaseConfigured } from '../net/firebase';
+import { getCoins, ownedCount } from './profile';
+import { getLocalBests } from './records';
 
 const ago = (t: number): string => {
   if (!t) return 'not yet';
@@ -80,4 +83,86 @@ export function showAccountDialog(onChange: () => void): void {
   };
 
   if (cachedAccount()) signedIn(); else signedOut();
+}
+
+// ---------- reminder to sign in ----------
+
+// Not under the `oversteer.` prefix: that's the save, and this is just when the player last said "not now".
+const REMINDER_KEY = 'oversteerSignInReminder';
+const REMINDER_EVERY_MS = 20 * 60 * 60 * 1000; // at most about once a day
+let remindedThisVisit = false;
+
+/**
+ * True when it's time to nudge the player to sign in: they aren't signed in, they have progress to lose, it's the
+ * first time this visit, and they haven't said "not now" in the last day.
+ */
+export function shouldRemindSignIn(): boolean {
+  if (!firebaseConfigured || cachedAccount() || remindedThisVisit) return false;
+  if (getCoins() <= 0 && ownedCount() <= 1 && getLocalBests().length === 0) return false;
+  try {
+    return Date.now() - (Number(localStorage.getItem(REMINDER_KEY)) || 0) > REMINDER_EVERY_MS;
+  } catch {
+    return true;
+  }
+}
+
+const plural = (n: number, one: string) => `${n.toLocaleString()} ${one}${n === 1 ? '' : 's'}`;
+
+/** Popup warning that progress lives only in this browser, with a one-click Google sign-in. */
+export function showSignInReminder(onChange: () => void): void {
+  remindedThisVisit = true;
+  const coins = getCoins();
+  const cars = ownedCount();
+  const records = getLocalBests().length;
+  const atRisk = [coins > 0 && plural(coins, 'coin'), cars > 1 && plural(cars, 'car'), records > 0 && plural(records, 'record')]
+    .filter(Boolean).join(', ').replace(/, ([^,]*)$/, ' and $1');
+
+  const wrap = document.createElement('div');
+  wrap.style.cssText = 'position:fixed;inset:0;z-index:10;display:flex;align-items:center;justify-content:center;background:rgba(11,10,20,.88);font-family:monospace;padding:12px;box-sizing:border-box';
+  document.body.appendChild(wrap);
+  // Keep the game from reacting to keys while the popup is open (Enter would otherwise start a race behind it).
+  wrap.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Escape') later(); });
+  wrap.addEventListener('keyup', (e) => e.stopPropagation());
+
+  wrap.innerHTML = `<div role="dialog" aria-modal="true" aria-labelledby="signin-title" style="background:#1d1b2e;border:3px solid #e63946;padding:18px 22px;width:min(430px,100%);color:#fff;text-align:center;box-sizing:border-box">
+    <div id="signin-title" style="color:#ffd166;font-size:19px;margin-bottom:10px">YOUR PROGRESS ISN'T BACKED UP</div>
+    <p style="color:#c9d1e3;font-size:13px;line-height:1.5;margin:0 0 10px">Your ${atRisk} are saved <b style="color:#fff">only in this browser</b>.</p>
+    <div style="background:rgba(230,57,70,.14);border:1px solid #e63946;color:#ffb3b8;font-size:12px;line-height:1.55;text-align:left;padding:9px 11px;margin:0 0 12px">
+      <b style="color:#ff6b75">You will lose them for good if:</b><br>
+      &bull; you clear your browsing data or cookies<br>
+      &bull; you play in a private / incognito window<br>
+      &bull; you switch to another browser or device<br>
+      &bull; this computer is reset (school computers often are)
+    </div>
+    <p style="color:#c9d1e3;font-size:12px;line-height:1.5;margin:0">Sign in with Google to keep them safe online and play on any device. Your leaderboard scores stay yours.</p>
+    <button data-go style="${btn}">SIGN IN WITH GOOGLE</button>
+    <div data-msg style="color:#e63946;font-size:12px;min-height:16px;margin-top:8px"></div>
+    <button data-later style="${link};margin-top:4px">not now (I understand I could lose my progress)</button>
+  </div>`;
+
+  const msg = wrap.querySelector<HTMLElement>('[data-msg]')!;
+  const go = wrap.querySelector<HTMLButtonElement>('[data-go]')!;
+  function later(): void {
+    try { localStorage.setItem(REMINDER_KEY, String(Date.now())); } catch { /* storage unavailable */ }
+    wrap.remove();
+  }
+  wrap.querySelector('[data-later]')!.addEventListener('click', later);
+  go.addEventListener('click', async () => {
+    go.disabled = true;
+    go.textContent = 'WAITING FOR GOOGLE...';
+    msg.textContent = '';
+    try {
+      await signInWithGoogle();
+      onChange();
+      go.textContent = 'SIGNED IN - YOUR PROGRESS IS SAFE';
+      go.style.background = '#52b788';
+      setTimeout(() => wrap.remove(), 1400);
+    } catch (err) {
+      go.disabled = false;
+      go.textContent = 'SIGN IN WITH GOOGLE';
+      const text = describeAuthError(err);
+      if (text) { msg.style.color = '#e63946'; msg.textContent = text; }
+    }
+  });
+  go.focus();
 }

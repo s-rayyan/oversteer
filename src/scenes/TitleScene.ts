@@ -2,7 +2,7 @@ import Phaser from 'phaser';
 import { GAME_HEIGHT, GAME_WIDTH, SceneKey } from '../game/config';
 import { selectedCar } from '../game/profile';
 import { getName } from '../game/player';
-import { showAccountDialog } from '../game/accountDialog';
+import { shouldRemindSignIn, showAccountDialog, showSignInReminder } from '../game/accountDialog';
 import { cachedAccount } from '../net/account';
 import { firebaseConfigured } from '../net/firebase';
 import { markTutorialSeen, tutorialSeen } from '../game/tutorial';
@@ -68,6 +68,8 @@ export class TitleScene extends Phaser.Scene {
       };
       refresh();
       text.on('pointerdown', () => showAccountDialog(refresh));
+      // Once the title has faded in, warn players with unsaved progress that it lives only in this browser.
+      if (shouldRemindSignIn()) this.time.delayedCall(700, () => { if (this.scene.isActive()) showSignInReminder(refresh); });
     }
     const full = this.add.text(3, GAME_HEIGHT - 3, 'F  FULLSCREEN', { ...mono, fontSize: '7px', color: '#8d99ae' })
       .setOrigin(0, 1).setInteractive({ useHandCursor: true }).on('pointerdown', () => this.scale.toggleFullscreen());

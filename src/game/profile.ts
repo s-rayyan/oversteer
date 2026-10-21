@@ -45,6 +45,7 @@ export function reloadProfile(): void {
 
 export const getCoins = (): number => profile().coins;
 export const owns = (id: string): boolean => profile().owned.includes(id);
+export const ownedCount = (): number => profile().owned.length;
 export const selectedCar = (): CarDef => getCar(profile().selected);
 export const getLevels = (id: string): Levels => ({ ...noUpgrades(), ...profile().levels[id] });
 export const equippedStats = (): CarStats => effectiveStats(selectedCar(), getLevels(selectedCar().id));
