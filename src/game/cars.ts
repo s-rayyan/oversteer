@@ -152,7 +152,7 @@ const CAR_LIST: CarDef[] = [
   },
   {
     id: 'legend', name: 'Legend', blurb: 'The best car in the game. Gold paint included.', price: 6500, carClass: 'hypercar', color: 0xd4af37, size: [18, 9], stripe: 0x14121f,
-    stats: { ...BASE, maxSpeed: 173, accel: 155, turnRate: 2.8, grip: 3.4, boostCharge: 1.0, boostDrain: 0.3, boostSpeed: 1.35, offRoadCap: 0.6 },
+    stats: { ...BASE, maxSpeed: 174, accel: 165, turnRate: 2.8, grip: 3.4, boostCharge: 1.0, boostDrain: 0.3, boostSpeed: 1.35, offRoadCap: 0.6 },
   },
 ];
 
