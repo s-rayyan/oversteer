@@ -166,3 +166,51 @@ export function showSignInReminder(onChange: () => void): void {
   });
   go.focus();
 }
+
+// ---------- required sign-in ----------
+
+/** True when this build makes players sign in with Google before they can play (not in local dev builds). */
+export const signInRequired = (): boolean => firebaseConfigured && !import.meta.env.DEV;
+
+let gateOpen = false;
+
+/**
+ * Full-screen Google sign-in that can't be dismissed: no close button, and Escape does nothing. Signing in links the
+ * player's existing anonymous account, so progress they already have carries over. `onDone` runs once they are in.
+ */
+export function showRequiredSignIn(onDone: () => void): void {
+  if (gateOpen) return;
+  gateOpen = true;
+  const wrap = document.createElement('div');
+  wrap.style.cssText = 'position:fixed;inset:0;z-index:10;display:flex;align-items:center;justify-content:center;background:rgba(11,10,20,.96);font-family:monospace;padding:12px;box-sizing:border-box';
+  document.body.appendChild(wrap);
+  // Keep the game from reacting to keys while the popup is open.
+  wrap.addEventListener('keydown', (e) => e.stopPropagation());
+  wrap.addEventListener('keyup', (e) => e.stopPropagation());
+  wrap.innerHTML = `<div role="dialog" aria-modal="true" aria-labelledby="gate-title" style="background:#1d1b2e;border:3px solid #ffd166;padding:20px 24px;width:min(400px,100%);color:#fff;text-align:center;box-sizing:border-box">
+    <div id="gate-title" style="color:#ffd166;font-size:22px;margin-bottom:10px">SIGN IN TO PLAY</div>
+    <p style="color:#c9d1e3;font-size:13px;line-height:1.5;margin:0 0 6px">Oversteer needs a Google account. It keeps your coins, cars and records safe online and lets you play on any device.</p>
+    <p style="color:#8d99ae;font-size:12px;line-height:1.5;margin:0">Progress and leaderboard scores you already have on this device carry over.</p>
+    <button data-go style="${btn}">SIGN IN WITH GOOGLE</button>
+    <div data-msg style="color:#e63946;font-size:12px;min-height:16px;margin-top:8px"></div>
+  </div>`;
+  const msg = wrap.querySelector<HTMLElement>('[data-msg]')!;
+  const go = wrap.querySelector<HTMLButtonElement>('[data-go]')!;
+  go.addEventListener('click', async () => {
+    go.disabled = true;
+    go.textContent = 'WAITING FOR GOOGLE...';
+    msg.textContent = '';
+    try {
+      await signInWithGoogle();
+      gateOpen = false;
+      wrap.remove();
+      onDone();
+    } catch (err) {
+      go.disabled = false;
+      go.textContent = 'SIGN IN WITH GOOGLE';
+      const text = describeAuthError(err);
+      if (text) msg.textContent = text;
+    }
+  });
+  go.focus();
+}

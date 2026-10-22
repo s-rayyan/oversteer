@@ -110,9 +110,9 @@ Tools: `npm run check:tracks` validates track layouts; `npm run check:cars` veri
 - `?renderer=canvas` on the address forces the plain 2D renderer, worth trying on a computer where WebGL is slow.
 - Roads are painted once into textures instead of being redrawn every frame (`bakeGraphics` in `Track.ts`).
 
-## Online accounts (optional Google sign-in)
+## Online accounts (Google sign-in required)
 
-Players can sign in with Google from the title screen to keep their coins, cars, upgrades and records online and
+Players must sign in with Google on the title screen before they can play (local `npm run dev` builds skip this). It keeps their coins, cars, upgrades and records online and
 use them on any device. Signing in links their existing anonymous account, so leaderboard scores and replays stay
 theirs. The online save is one document per player (`users/{uid}`), merged with the device's save by
 `src/game/cloudMerge.ts` (tested by `npm run test:cloud`; coins use a three-way rule so devices never double-count).
