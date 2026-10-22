@@ -5,7 +5,8 @@ import type { Pt } from '../game/spline';
 import { surfaceFlags, type SurfaceFlags } from '../game/surfaces';
 import { buildTrack, type RoadPt } from '../game/Track';
 import type { TrackDef } from '../game/tracks';
-import { markTutorialSeen } from '../game/tutorial';
+import { addCoins } from '../game/profile';
+import { TUTORIAL_GIFT, claimTutorialGift, markTutorialSeen } from '../game/tutorial';
 import type { OverlayEntry } from '../game/ui';
 import { DriveScene, type Spawn } from './DriveScene';
 
@@ -169,10 +170,13 @@ export class TutorialScene extends DriveScene {
       this.title.setVisible(false);
       this.body.setVisible(false);
       this.bar.clear();
+      const gift = claimTutorialGift();
+      if (gift) addCoins(TUTORIAL_GIFT);
       this.finish('TUTORIAL DONE', [
         'You know the basics:',
         'steer to heat tyres, drift to fill',
         'boost, SPACE to use it, pads to top up.',
+        ...(gift ? [`+${TUTORIAL_GIFT} coins! Press G on the home`, 'screen to open the garage, buy an', 'expensive car and max it out.'] : []),
         'Now go set a time!',
       ]);
     }

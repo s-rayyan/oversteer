@@ -97,4 +97,28 @@ export const baselineBot: Controller = ({ car, samples, idx, boost }) => {
   };
 };
 
+/**
+ * A bot that drives the way players do: weave left and right on the straights to heat the tyres and
+ * fill the boost meter, and boost whenever there's any in the tank. Returns a fresh controller per lap.
+ */
+export const makePlayerBot = (weavePeriod = 0.7, refillBelow = 0.9): Controller => {
+  let t = 0;
+  return ({ car, samples, idx, boost, dt }) => {
+    t += dt;
+    const n = samples.length, sp = car.speed;
+    const look = Math.max(12, Math.min(40, Math.round(10 + sp * 0.12)));
+    const aim = samples[(idx + look) % n];
+    const want = Math.atan2(aim.y - car.y, aim.x - car.x);
+    const d = Math.atan2(Math.sin(want - car.heading), Math.cos(want - car.heading)), ad = Math.abs(d);
+    const weave = ad < 0.2 && boost < refillBelow && sp > 50;
+    const steer = weave ? (Math.sin((t / weavePeriod) * 2 * Math.PI) > 0 ? 1 : -1) : (d > 0.04 ? 1 : 0) - (d < -0.04 ? 1 : 0);
+    return {
+      steer,
+      throttle: ad > 1.1 && sp > 60 ? -1 : !(ad > 0.6 && sp > 85) ? 1 : 0,
+      boost: boost > 0.02 && ad < 0.5,
+      handbrake: ad > 0.8 && sp > 70,
+    };
+  };
+};
+
 export const carStats = (c: CarDef): CarStats => effectiveStats(c, noUpgrades());

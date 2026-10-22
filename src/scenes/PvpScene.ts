@@ -12,6 +12,7 @@ const SEND_MS = 150; // how often our position is broadcast (~7 a second)
 const LAG_CAP = 0.3; // seconds an opponent is extrapolated ahead of their last update
 const SMOOTH = 14; // how fast a drawn opponent chases where it should be (per second)
 const GONE_MS = 7000; // no updates for this long and they've dropped out
+const CLEAR_DELAY_MS = 15000; // how long our live record lingers after we leave the race
 const GRACE_MS = 2200; // after we cross the line, wait this long for a finish report that is still in flight
 const SLOT_COLOR = [0xffd166, 0xe63946, 0x52b788, 0x4895ef];
 const SLOT_CSS = ['#ffd166', '#e63946', '#52b788', '#4895ef'];
@@ -107,6 +108,9 @@ export class PvpScene extends RaceScene {
       this.unwatch?.();
       this.unwatch = null;
       if (!this.finished) this.send(true); // tell the others we've gone
+      // Remove our live record once the others have had time to read our finish; a closed tab leaves it for the next clean-up.
+      const room = this.roomId;
+      window.setTimeout(() => void pvp().clear(room).catch(() => undefined), CLEAR_DELAY_MS);
     });
   }
 

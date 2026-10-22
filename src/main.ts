@@ -8,6 +8,7 @@ import { BootScene } from './scenes/BootScene';
 import { ChallengesScene } from './scenes/ChallengesScene';
 import { StyleScene } from './scenes/StyleScene';
 import { audio } from './game/audio';
+import { initLobbyAlerts } from './game/lobbyAlert';
 import { GarageScene } from './scenes/GarageScene';
 import { LeaderboardScene } from './scenes/LeaderboardScene';
 import { MenuScene } from './scenes/MenuScene';
@@ -51,6 +52,7 @@ function start(): void {
   audio.unlock();
 
   addFpsMeter(game);
+  initLobbyAlerts(game); // offer a PvP race when someone opens a lobby
   void completeEmailLinkSignIn().catch((e) => console.warn('[email link]', e)); // opened from an emailed sign-in link?
   initAccountSync(); // keep a signed-in player's save in step with their online account
   void syncLocalBests();

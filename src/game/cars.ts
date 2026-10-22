@@ -64,12 +64,12 @@ export const CAR_CLASSES: Record<CarClassId, CarClass> = {
   agile: {
     id: 'agile', label: 'AGILE', color: '#c77dff',
     blurb: 'Tiny and twitchy. Wins on hairpins.',
-    matches: (s) => s.turnRate >= 3.0 && s.maxSpeed <= 130,
+    matches: (s) => s.turnRate >= 3.0 && s.maxSpeed <= 170,
   },
   hypercar: {
     id: 'hypercar', label: 'HYPERCAR', color: '#00b4d8',
     blurb: 'Premium all-rounder. Specialists can beat it.',
-    matches: (s) => s.maxSpeed >= 145 && s.grip >= 2.4 && s.grip < 3.5 && s.offRoadCap < 0.8 && s.boostSpeed < 1.5,
+    matches: (s) => s.maxSpeed >= 145 && s.turnRate < 3.0 && s.grip >= 2.4 && s.grip < 3.5 && s.offRoadCap < 0.8 && s.boostSpeed < 1.5,
   },
 };
 
@@ -147,8 +147,8 @@ const CAR_LIST: CarDef[] = [
     stats: { ...BASE, maxSpeed: 158, accel: 160, turnRate: 2.53, grip: 4.8, boostCharge: 0.7, boostDrain: 0.265 },
   },
   {
-    id: 'comet', name: 'Comet', blurb: 'Almost the best car in the game.', price: 4200, carClass: 'hypercar', color: 0x00b4d8, size: [17, 9], stripe: 0xffffff,
-    stats: { ...BASE, maxSpeed: 147, accel: 129, turnRate: 1.8, grip: 2.45, boostCharge: 0.8, boostDrain: 0.3, boostSpeed: 1.15, offRoadCap: 0.3, padGain: 0.2 },
+    id: 'comet', name: 'Comet', blurb: 'Darts through corners and burns on boost.', price: 4200, carClass: 'agile', color: 0x00b4d8, size: [17, 9], stripe: 0xffffff,
+    stats: { ...BASE, maxSpeed: 165, accel: 150, turnRate: 3.3, grip: 2.6, boostCharge: 1.1, boostDrain: 0.28, boostSpeed: 1.39, padGain: 0.9 },
   },
   {
     id: 'legend', name: 'Legend', blurb: 'The best car in the game. Gold paint included.', price: 6500, carClass: 'hypercar', color: 0xd4af37, size: [18, 9], stripe: 0x14121f,

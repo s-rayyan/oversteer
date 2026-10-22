@@ -6,6 +6,7 @@ import { askName } from '../game/nameDialog';
 import { getName, setName } from '../game/player';
 import { selectedCar } from '../game/profile';
 import { DIFFICULTY_COLOR, TRACKS, type TrackDef } from '../game/tracks';
+import { lobbyAlertsOn, setLobbyAlerts } from '../game/lobbyAlert';
 import { HEARTBEAT_MS, PvpError, ROOM_MAX, livePlayers, pvp, pvpAvailable, type Member, type Room } from '../net/pvp';
 
 const AUTO_START_MS = 8000; // after the second driver arrives, wait this long for more before a public room starts
@@ -14,17 +15,19 @@ const HOP_CHECK_MS = 5000;
 
 type Mode = 'menu' | 'busy' | 'room';
 
-const OPTIONS = ['QUICK MATCH', 'PRIVATE ROOM', 'JOIN WITH CODE'] as const;
+const OPTIONS = ['QUICK MATCH', 'PRIVATE ROOM', 'JOIN WITH CODE', 'ALERTS'] as const;
 const OPTION_HINT = [
   'Race whoever is looking for this track.',
   'Make a room and share its code with friends.',
   'Type a friend\'s room code.',
+  'Get a note when someone opens a public room.',
 ];
 
 /** Waiting room for a head-to-head race: find or make a room, see who has joined, then hand over to PvpScene. */
 export class PvpLobbyScene extends Phaser.Scene {
   private track!: TrackDef;
   private auto: 'quick' | null = null;
+  private joinCode: string | null = null;
   private mode: Mode = 'menu';
   private sel = 0;
   private roomId: string | null = null;
@@ -45,9 +48,10 @@ export class PvpLobbyScene extends Phaser.Scene {
     super(SceneKey.PvpLobby);
   }
 
-  init(data: { trackId?: string; auto?: 'quick' }): void {
+  init(data: { trackId?: string; auto?: 'quick'; joinCode?: string }): void {
     this.track = TRACKS.find((t) => t.id === data.trackId) ?? TRACKS[0];
     this.auto = data.auto ?? null;
+    this.joinCode = data.joinCode ?? null;
   }
 
   create(): void {
@@ -103,7 +107,8 @@ export class PvpLobbyScene extends Phaser.Scene {
       this.fail('Could not reach the online service.');
       return;
     }
-    if (this.auto === 'quick') void this.quickMatch();
+    if (this.joinCode) void this.joinWithCode(this.joinCode);
+    else if (this.auto === 'quick') void this.quickMatch();
     else this.showMenu();
   }
 
@@ -130,7 +135,10 @@ export class PvpLobbyScene extends Phaser.Scene {
   }
 
   private paintMenu(): void {
-    this.ui.forEach((t, i) => t.setColor(i === this.sel ? '#ffd166' : '#ffffff').setText(`${i === this.sel ? '> ' : '  '}${OPTIONS[i]}${i === this.sel ? ' <' : '  '}`));
+    this.ui.forEach((t, i) => {
+      const label = i === OPTIONS.length - 1 ? `${OPTIONS[i]}: ${lobbyAlertsOn() ? 'ON' : 'OFF'}` : OPTIONS[i];
+      t.setColor(i === this.sel ? '#ffd166' : '#ffffff').setText(`${i === this.sel ? '> ' : '  '}${label}${i === this.sel ? ' <' : '  '}`);
+    });
     this.sub.setText(OPTION_HINT[this.sel]);
   }
 
@@ -144,7 +152,8 @@ export class PvpLobbyScene extends Phaser.Scene {
     if (this.mode === 'menu') {
       if (this.sel === 0) void this.quickMatch();
       else if (this.sel === 1) void this.createRoom(false);
-      else void this.joinWithCode();
+      else if (this.sel === 2) void this.joinWithCode();
+      else { setLobbyAlerts(!lobbyAlertsOn()); this.paintMenu(); }
     } else if (this.mode === 'room') {
       this.startNow();
     }
@@ -196,8 +205,8 @@ export class PvpLobbyScene extends Phaser.Scene {
     }
   }
 
-  private async joinWithCode(): Promise<void> {
-    const code = await askCode();
+  private async joinWithCode(known?: string): Promise<void> {
+    const code = known ?? await askCode();
     if (!code) return;
     this.busy(`Joining ${code}...`);
     try {

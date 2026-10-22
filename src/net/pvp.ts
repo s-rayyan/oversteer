@@ -1,9 +1,10 @@
-import { firebaseConfigured, getFirebase } from './firebase';
+import { firebaseConfigured, getFirebase, getRealtime, realtimeConfigured } from './firebase';
 
 /**
  * Head-to-head races. A room is one Firestore document (`rooms/{code}`) holding the roster, plus one small
- * `live` document per driver (`rooms/{code}/live/{uid}`) that each client rewrites a few times a second with its
- * car's position. Everyone watches the others' live documents and draws them as cars on their own screen, so the
+ * live record per driver that each client rewrites a few times a second with its car's position. Those records go
+ * in the Realtime Database (`live/{code}/{uid}`, billed by bandwidth, not per write) when VITE_FIREBASE_DATABASE_URL
+ * is set, and otherwise in Firestore (`rooms/{code}/live/{uid}`). Everyone watches the others' live documents and draws them as cars on their own screen, so the
  * races are not simulated on a server: each player drives their own car and the finish times are self-reported.
  *
  * With `?pvp=local` on a dev build the same interface runs on localStorage instead, so two browser tabs can race
@@ -16,6 +17,8 @@ export const PRESENCE_MS = 25_000;
 export const HEARTBEAT_MS = 8_000;
 /** Public rooms older than this are no longer offered by quick match. */
 const ROOM_FRESH_MS = 4 * 60_000;
+/** Rooms are marked to expire this long after they open (see the TTL note in the README). */
+const ROOM_TTL_MS = 24 * 3600_000;
 
 export interface Member {
   name: string;
@@ -52,6 +55,16 @@ export interface Live {
   at: number;
 }
 
+/** The most recent public lobby, announced to everyone online so they can be offered a game. */
+export interface Beacon {
+  room: string;
+  track: string;
+  name: string;
+  host: string;
+  /** When the lobby opened (ms since epoch). */
+  at: number;
+}
+
 export type JoinError = 'missing' | 'full' | 'started';
 
 interface Backend {
@@ -64,6 +77,9 @@ interface Backend {
   findOpen(track: string, exceptId?: string): Promise<Room | null>;
   watch(id: string, cb: (room: Room | null) => void): () => void;
   push(id: string, s: Live): Promise<void>;
+  /** Remove our own live record once the race is over, so finished races leave nothing behind. */
+  clear(id: string): Promise<void>;
+  watchBeacon(cb: (b: Beacon) => void): () => void;
   watchLive(id: string, cb: (uid: string, s: Live) => void): () => void;
 }
 
@@ -108,7 +124,12 @@ const firestore: Backend = {
         await fs.setDoc(fs.doc(db, 'rooms', id), {
           track, host: uid, public: isPublic, status: 'lobby', createdAt: fs.serverTimestamp(), startedAt: null,
           players: { [uid]: me },
+          expireAt: fs.Timestamp.fromMillis(Date.now() + ROOM_TTL_MS), // a Firestore TTL policy on this field deletes old rooms
         });
+        if (isPublic) {
+          // One shared document that everyone online watches, so a waiting lobby can be offered to them (best effort).
+          void fs.setDoc(fs.doc(db, 'lobbyBeacon', 'latest'), { room: id, track, name: me.name, host: uid, at: fs.serverTimestamp() }).catch(() => undefined);
+        }
         return id;
       } catch (e) {
         if (tries >= 4) throw e; // the code was taken (the write is refused as an update); try another
@@ -166,13 +187,59 @@ const firestore: Backend = {
   },
 
   async push(id, s) {
+    if (realtimeConfigured) {
+      const { rtdb, rt, uid } = await getRealtime();
+      const ref = rt.ref(rtdb, `live/${id}/${uid}`);
+      if (!droppedHooked.has(`${id}/${uid}`)) {
+        droppedHooked.add(`${id}/${uid}`);
+        void rt.onDisconnect(ref).update({ d: true, at: Date.now() }).catch(() => undefined); // closing the tab marks us gone
+      }
+      await rt.set(ref, s);
+      return;
+    }
     const { db, uid, fs } = await getFirebase();
     await fs.setDoc(fs.doc(db, 'rooms', id, 'live', uid), s);
+  },
+
+  async clear(id) {
+    if (!realtimeConfigured) return; // the Firestore fallback has no delete rule; those documents are left to the room's expiry
+    const { rtdb, rt, uid } = await getRealtime();
+    const ref = rt.ref(rtdb, `live/${id}/${uid}`);
+    droppedHooked.delete(`${id}/${uid}`);
+    await rt.onDisconnect(ref).cancel().catch(() => undefined);
+    await rt.remove(ref);
+  },
+
+  watchBeacon(cb) {
+    let stop = false;
+    let off: (() => void) | null = null;
+    void getFirebase().then(({ db, fs }) => {
+      if (stop) return;
+      off = fs.onSnapshot(fs.doc(db, 'lobbyBeacon', 'latest'), (snap) => {
+        if (!snap.exists() || snap.metadata.hasPendingWrites) return;
+        const d = snap.data({ serverTimestamps: 'estimate' });
+        const at = (d.at as { toMillis?: () => number } | null)?.toMillis?.() ?? Date.now();
+        cb({ room: String(d.room), track: String(d.track), name: String(d.name), host: String(d.host), at });
+      }, () => undefined);
+    }).catch(() => undefined);
+    return () => { stop = true; off?.(); };
   },
 
   watchLive(id, cb) {
     let stop = false;
     let off: (() => void) | null = null;
+    if (realtimeConfigured) {
+      void getRealtime().then(({ rtdb, rt }) => {
+        if (stop) return;
+        // Child events deliver only the driver that changed, so each update is sent once, not the whole room.
+        const ref = rt.ref(rtdb, `live/${id}`);
+        const handle = (snap: { key: string | null; val(): unknown }) => { if (snap.key) cb(snap.key, snap.val() as Live); };
+        const a = rt.onChildAdded(ref, handle);
+        const c = rt.onChildChanged(ref, handle);
+        off = () => { a(); c(); };
+      }).catch(() => undefined);
+      return () => { stop = true; off?.(); };
+    }
     void getFirebase().then(({ db, fs }) => {
       if (stop) return;
       off = fs.onSnapshot(fs.collection(db, 'rooms', id, 'live'), (snap) => {
@@ -182,6 +249,9 @@ const firestore: Backend = {
     return () => { stop = true; off?.(); };
   },
 };
+
+/** Rooms we've already registered an on-disconnect handler for this session. */
+const droppedHooked = new Set<string>();
 
 function toRoom(id: string, d: Record<string, unknown>): Room {
   const created = d.createdAt as { toMillis?: () => number } | null;
@@ -223,6 +293,7 @@ const local: Backend = {
   async create(track, isPublic, me) {
     const id = newCode();
     lsSet(`${P}room.${id}`, { id, track, host: localUid(), public: isPublic, status: 'lobby', createdAt: Date.now(), startedAt: null, players: { [localUid()]: me } } satisfies Room);
+    if (isPublic) lsSet(`${P}beacon`, { room: id, track, name: me.name, host: localUid(), at: Date.now() } satisfies Beacon);
     return id;
   },
   async join(id, me) {
@@ -270,6 +341,15 @@ const local: Backend = {
   },
   async push(id, s) {
     lsSet(`${P}live.${id}.${localUid()}`, s);
+  },
+  async clear(id) {
+    localStorage.removeItem(`${P}live.${id}.${localUid()}`);
+  },
+  watchBeacon(cb) {
+    const key = `${P}beacon`;
+    const l = (k: string) => { const b = k === key ? lsGet<Beacon>(key) : null; if (b) cb(b); };
+    listeners.add(l);
+    return () => listeners.delete(l);
   },
   watchLive(id, cb) {
     const prefix = `${P}live.${id}.`;

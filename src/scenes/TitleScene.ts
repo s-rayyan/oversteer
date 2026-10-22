@@ -84,6 +84,7 @@ export class TitleScene extends Phaser.Scene {
     kb.on('keydown-DOWN', () => move(1));
     kb.on('keydown-W', () => move(-1));
     kb.on('keydown-S', () => move(1));
+    kb.on('keydown-G', () => this.go(this.entries.findIndex(([, key]) => key === SceneKey.Garage)));
     kb.on('keydown-ENTER', () => this.go(this.sel));
     kb.on('keydown-SPACE', () => this.go(this.sel));
     this.events.once('shutdown', () => kb.removeAllListeners());

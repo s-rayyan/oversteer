@@ -389,7 +389,7 @@ export abstract class DriveScene extends Phaser.Scene {
     if (tier >= 3) this.confetti(30);
   }
 
-  /** Many keyboards drop SPACE while arrow keys are held, so point players at Z (shown at most every 20s). */
+  /** Many keyboards drop SPACE while arrow keys are held, so when someone presses SPACE while steering or driving, point them at Z (shown at most every 20s). */
   private boostTip(): void {
     if (performance.now() - this.lastBoostTip < 20000) return;
     this.lastBoostTip = performance.now();
@@ -561,7 +561,6 @@ export abstract class DriveScene extends Phaser.Scene {
         audio.sfx('go');
         this.tweens.add({ targets: this.hint, alpha: 0, delay: 5000, duration: 800 }); // hints fade once you're racing
         this.time.delayedCall(700, () => this.banner.setText(''));
-        if (!this.autoDrive) this.time.delayedCall(1200, () => this.boostTip());
       } else {
         this.banner.setText(String(Math.ceil(this.countdown)));
         const n = Math.ceil(this.countdown);

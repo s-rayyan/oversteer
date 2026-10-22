@@ -23,7 +23,8 @@ const signInFormHtml = (): string => `
   <input data-email type="email" autocomplete="email" placeholder="email" style="${field}">
   <input data-pass type="password" autocomplete="current-password" placeholder="password" style="${field}">
   <div style="display:flex;gap:8px"><button data-signin style="${btn}">SIGN IN</button><button data-create style="${btn};background:#c9d1e3">CREATE ACCOUNT</button></div>
-  <button data-link style="${small}">email me a sign-in link instead (no password)</button>
+  <div style="color:#ffd166;font-size:12px;margin-top:10px;line-height:1.4">Making an account? Remember your password! You can use your school email.</div>
+  <button data-link style="${small}">email me a sign-in link instead (no password; may not arrive on school email)</button>
   <div data-msg style="color:#e63946;font-size:12px;min-height:16px;margin-top:8px"></div>`;
 
 /** Makes the buttons from signInFormHtml work. `onSignedIn` runs once someone is in. */

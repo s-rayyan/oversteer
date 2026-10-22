@@ -96,13 +96,15 @@ service cloud.firestore {
     match /rooms/{room} {
       allow read: if request.auth != null;
       allow create: if request.auth != null
-        && request.resource.data.keys().hasOnly(['track', 'host', 'public', 'status', 'createdAt', 'startedAt', 'players'])
+        && request.resource.data.keys().hasOnly(['track', 'host', 'public', 'status', 'createdAt', 'startedAt', 'players', 'expireAt'])
         && request.resource.data.host == request.auth.uid
         && request.resource.data.track is string && request.resource.data.track.size() <= 24
         && request.resource.data.public is bool
         && request.resource.data.status == 'lobby'
         && request.resource.data.createdAt == request.time
         && request.resource.data.startedAt == null
+        && request.resource.data.expireAt is timestamp
+        && request.resource.data.expireAt <= request.time + duration.value(2, 'd') // a TTL policy on this field deletes old rooms
         && request.resource.data.players.keys().hasOnly([request.auth.uid])
         && request.resource.data.players.size() == 1
         && validMember(request.resource.data.players[request.auth.uid]);
@@ -140,6 +142,20 @@ service cloud.firestore {
           && request.resource.data.at is int;
         allow delete: if false;
       }
+    }
+
+    // The newest public lobby, announced to everyone online so they can be offered a game: one document, overwritten
+    // by whoever opens a public room, watched by every client. Players can only name themselves as the host.
+    match /lobbyBeacon/{doc} {
+      allow read: if request.auth != null;
+      allow create, update: if request.auth != null && doc == 'latest'
+        && request.resource.data.keys().hasOnly(['room', 'track', 'name', 'host', 'at'])
+        && request.resource.data.room is string && request.resource.data.room.size() == 5
+        && request.resource.data.track is string && request.resource.data.track.size() <= 24
+        && request.resource.data.name is string && request.resource.data.name.matches('^[A-Za-z0-9 _.-]{1,12}$')
+        && request.resource.data.host == request.auth.uid
+        && request.resource.data.at == request.time;
+      allow delete: if false;
     }
 
     // Optional online account save: users/{auth uid}. Only its owner can read or write it, and only once
