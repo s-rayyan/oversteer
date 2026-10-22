@@ -110,12 +110,12 @@ Tools: `npm run check:tracks` validates track layouts; `npm run check:cars` veri
 - `?renderer=canvas` on the address forces the plain 2D renderer, worth trying on a computer where WebGL is slow.
 - Roads are painted once into textures instead of being redrawn every frame (`bakeGraphics` in `Track.ts`).
 
-## Online accounts (Google sign-in required)
+## Online accounts (sign-in required)
 
-Players must sign in with Google on the title screen before they can play (local `npm run dev` builds skip this). It keeps their coins, cars, upgrades and records online and
+Players must sign in on the title screen, with Google, an email and password, or a passwordless emailed link, before they can play (local `npm run dev` builds skip this). It keeps their coins, cars, upgrades and records online and
 use them on any device. Signing in links their existing anonymous account, so leaderboard scores and replays stay
 theirs. The online save is one document per player (`users/{uid}`), merged with the device's save by
 `src/game/cloudMerge.ts` (tested by `npm run test:cloud`; coins use a three-way rule so devices never double-count).
 
-One-time setup: Firebase console > Authentication > Sign-in method > enable **Google**; make sure your hosting
+One-time setup: Firebase console > Authentication > Sign-in method > enable **Google** and **Email/Password** (turn on its **Email link (passwordless sign-in)** option too); make sure your hosting
 address is under Authentication > Settings > Authorized domains; then `firebase deploy --only firestore:rules`.

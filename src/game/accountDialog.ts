@@ -1,4 +1,4 @@
-import { cachedAccount, describeAuthError, lastSyncedAt, signInWithGoogle, signOutAccount, syncCloud } from '../net/account';
+import { SIGNED_IN_EVENT, cachedAccount, describeAuthError, lastSyncedAt, sendEmailLink, signInWithGoogle, signInWithPassword, signOutAccount, syncCloud } from '../net/account';
 import { firebaseConfigured } from '../net/firebase';
 import { getCoins, ownedCount } from './profile';
 import { getLocalBests } from './records';
@@ -11,6 +11,60 @@ const ago = (t: number): string => {
 
 const btn = 'background:#ffd166;border:0;color:#14121f;font:bold 14px monospace;padding:10px 18px;cursor:pointer;width:100%;margin-top:8px';
 const link = 'background:none;border:0;color:#8d99ae;font:12px monospace;margin-top:12px;cursor:pointer;text-decoration:underline';
+
+
+const field = 'display:block;width:100%;box-sizing:border-box;background:#14121f;border:2px solid #3d405b;color:#fff;font:14px monospace;padding:9px 10px;margin-top:8px';
+const small = 'background:none;border:0;color:#8d99ae;font:12px monospace;margin-top:10px;cursor:pointer;text-decoration:underline';
+
+/** The three ways to sign in: Google, email and password, or an emailed link. Wire it up with wireSignInForm. */
+const signInFormHtml = (): string => `
+  <button data-google style="${btn}">SIGN IN WITH GOOGLE</button>
+  <div style="color:#8d99ae;font-size:12px;margin:14px 0 2px">or use your email</div>
+  <input data-email type="email" autocomplete="email" placeholder="email" style="${field}">
+  <input data-pass type="password" autocomplete="current-password" placeholder="password" style="${field}">
+  <div style="display:flex;gap:8px"><button data-signin style="${btn}">SIGN IN</button><button data-create style="${btn};background:#c9d1e3">CREATE ACCOUNT</button></div>
+  <button data-link style="${small}">email me a sign-in link instead (no password)</button>
+  <div data-msg style="color:#e63946;font-size:12px;min-height:16px;margin-top:8px"></div>`;
+
+/** Makes the buttons from signInFormHtml work. `onSignedIn` runs once someone is in. */
+function wireSignInForm(root: HTMLElement, onSignedIn: () => void): void {
+  const q = <T extends HTMLElement>(s: string) => root.querySelector<T>(s)!;
+  const msg = q<HTMLElement>('[data-msg]');
+  const buttons = [...root.querySelectorAll<HTMLButtonElement>('button')].filter((b) => b.dataset.google !== undefined || b.dataset.signin !== undefined || b.dataset.create !== undefined || b.dataset.link !== undefined);
+  const say = (text: string | null, ok = false) => { msg.style.color = ok ? '#52b788' : '#e63946'; msg.textContent = text ?? ''; };
+  const run = async (what: string, job: () => Promise<void>) => {
+    buttons.forEach((b) => { b.disabled = true; });
+    say(what, true);
+    try {
+      await job();
+    } catch (err) {
+      say(describeAuthError(err));
+    }
+    buttons.forEach((b) => { b.disabled = false; });
+  };
+  const creds = (): { email: string; password: string } | null => {
+    const email = q<HTMLInputElement>('[data-email]').value.trim();
+    const password = q<HTMLInputElement>('[data-pass]').value;
+    if (!email || !password) { say('Enter your email and a password.'); return null; }
+    return { email, password };
+  };
+  const withPassword = (create: boolean) => {
+    const c = creds();
+    if (c) void run(create ? 'Creating your account...' : 'Signing in...', async () => { await signInWithPassword(c.email, c.password, create); onSignedIn(); });
+  };
+  q('[data-google]').addEventListener('click', () => void run('Waiting for Google...', async () => { await signInWithGoogle(); onSignedIn(); }));
+  q('[data-signin]').addEventListener('click', () => withPassword(false));
+  q('[data-create]').addEventListener('click', () => withPassword(true));
+  q('[data-pass]').addEventListener('keydown', (e) => { if ((e as KeyboardEvent).key === 'Enter') withPassword(false); });
+  q('[data-link]').addEventListener('click', () => {
+    const email = q<HTMLInputElement>('[data-email]').value.trim();
+    if (!email) { say('Type your email above first.'); return; }
+    void run('Sending...', async () => {
+      await sendEmailLink(email);
+      say('Link sent! Open it in this browser to sign in. Check spam if it is missing.', true);
+    });
+  });
+}
 
 /** DOM popup for signing in to (or out of) the optional online account. `onChange` runs when the state changes. */
 export function showAccountDialog(onChange: () => void): void {
@@ -34,23 +88,9 @@ export function showAccountDialog(onChange: () => void): void {
   const busy = (b: HTMLButtonElement, text: string) => { b.disabled = true; b.textContent = text; };
 
   const signedOut = () => {
-    card(`<p style="color:#c9d1e3;font-size:13px;line-height:1.5;margin:0 0 6px">Sign in with Google to keep your coins, cars and records safe online and use them on any device.</p>
-      <p style="color:#8d99ae;font-size:12px;line-height:1.5;margin:0">Your leaderboard scores stay yours. Without signing in, progress lives only in this browser.</p>
-      <button data-go style="${btn}">SIGN IN WITH GOOGLE</button>`);
-    wrap.querySelector<HTMLButtonElement>('[data-go]')!.addEventListener('click', async (e) => {
-      const b = e.currentTarget as HTMLButtonElement;
-      busy(b, 'WAITING FOR GOOGLE...');
-      try {
-        await signInWithGoogle();
-        onChange();
-        signedIn();
-      } catch (err) {
-        b.disabled = false;
-        b.textContent = 'SIGN IN WITH GOOGLE';
-        const text = describeAuthError(err);
-        if (text) msg(text);
-      }
-    });
+    card(`<p style="color:#c9d1e3;font-size:13px;line-height:1.5;margin:0 0 6px">Sign in to keep your coins, cars and records safe online and use them on any device.</p>
+      <p style="color:#8d99ae;font-size:12px;line-height:1.5;margin:0">Your leaderboard scores stay yours.</p>${signInFormHtml()}`);
+    wireSignInForm(wrap, () => { onChange(); signedIn(); });
   };
 
   const signedIn = () => {
@@ -175,7 +215,7 @@ export const signInRequired = (): boolean => firebaseConfigured && !import.meta.
 let gateOpen = false;
 
 /**
- * Full-screen Google sign-in that can't be dismissed: no close button, and Escape does nothing. Signing in links the
+ * Full-screen sign-in (Google, email and password, or emailed link) that can't be dismissed: no close button, and Escape does nothing. Signing in links the
  * player's existing anonymous account, so progress they already have carries over. `onDone` runs once they are in.
  */
 export function showRequiredSignIn(onDone: () => void): void {
@@ -187,30 +227,20 @@ export function showRequiredSignIn(onDone: () => void): void {
   // Keep the game from reacting to keys while the popup is open.
   wrap.addEventListener('keydown', (e) => e.stopPropagation());
   wrap.addEventListener('keyup', (e) => e.stopPropagation());
-  wrap.innerHTML = `<div role="dialog" aria-modal="true" aria-labelledby="gate-title" style="background:#1d1b2e;border:3px solid #ffd166;padding:20px 24px;width:min(400px,100%);color:#fff;text-align:center;box-sizing:border-box">
+  wrap.innerHTML = `<div role="dialog" aria-modal="true" aria-labelledby="gate-title" style="background:#1d1b2e;border:3px solid #ffd166;padding:20px 24px;width:min(400px,100%);max-height:100%;overflow:auto;color:#fff;text-align:center;box-sizing:border-box">
     <div id="gate-title" style="color:#ffd166;font-size:22px;margin-bottom:10px">SIGN IN TO PLAY</div>
-    <p style="color:#c9d1e3;font-size:13px;line-height:1.5;margin:0 0 6px">Oversteer needs a Google account. It keeps your coins, cars and records safe online and lets you play on any device.</p>
-    <p style="color:#8d99ae;font-size:12px;line-height:1.5;margin:0">Progress and leaderboard scores you already have on this device carry over.</p>
-    <button data-go style="${btn}">SIGN IN WITH GOOGLE</button>
-    <div data-msg style="color:#e63946;font-size:12px;min-height:16px;margin-top:8px"></div>
+    <p style="color:#c9d1e3;font-size:13px;line-height:1.5;margin:0 0 6px">Oversteer needs an account. It keeps your coins, cars and records safe online and lets you play on any device.</p>
+    <p style="color:#8d99ae;font-size:12px;line-height:1.5;margin:0">Progress and leaderboard scores you already have on this device carry over.</p>${signInFormHtml()}
   </div>`;
-  const msg = wrap.querySelector<HTMLElement>('[data-msg]')!;
-  const go = wrap.querySelector<HTMLButtonElement>('[data-go]')!;
-  go.addEventListener('click', async () => {
-    go.disabled = true;
-    go.textContent = 'WAITING FOR GOOGLE...';
-    msg.textContent = '';
-    try {
-      await signInWithGoogle();
-      gateOpen = false;
-      wrap.remove();
-      onDone();
-    } catch (err) {
-      go.disabled = false;
-      go.textContent = 'SIGN IN WITH GOOGLE';
-      const text = describeAuthError(err);
-      if (text) msg.textContent = text;
-    }
-  });
-  go.focus();
+  const close = () => {
+    window.removeEventListener(SIGNED_IN_EVENT, onEvent);
+    gateOpen = false;
+    wrap.remove();
+    onDone();
+  };
+  // Also closes when sign-in finishes elsewhere, e.g. by opening an emailed link.
+  const onEvent = () => { if (cachedAccount()) close(); };
+  window.addEventListener(SIGNED_IN_EVENT, onEvent);
+  wireSignInForm(wrap, () => { if (gateOpen) close(); });
+  wrap.querySelector<HTMLInputElement>('[data-email]')!.focus();
 }

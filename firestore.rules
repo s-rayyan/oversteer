@@ -143,7 +143,7 @@ service cloud.firestore {
     }
 
     // Optional online account save: users/{auth uid}. Only its owner can read or write it, and only once
-    // signed in with Google (not as an anonymous player).
+    // signed in to an account (not as an anonymous player).
     match /users/{uid} {
       allow read: if request.auth != null && request.auth.uid == uid;
       allow create, update: if request.auth != null && request.auth.uid == uid

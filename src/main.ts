@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
 import { GAME_WIDTH, GAME_HEIGHT } from './game/config';
 import { addFpsMeter } from './game/fpsMeter';
-import { initAccountSync } from './net/account';
+import { completeEmailLinkSignIn, initAccountSync } from './net/account';
 import { syncLocalBests } from './net/leaderboard';
 import { isEmbedded, moveToHome, onFirebaseHost, onOldAddress, receiveSave, showLauncher } from './game/saveTransfer';
 import { BootScene } from './scenes/BootScene';
@@ -51,6 +51,7 @@ function start(): void {
   audio.unlock();
 
   addFpsMeter(game);
+  void completeEmailLinkSignIn().catch((e) => console.warn('[email link]', e)); // opened from an emailed sign-in link?
   initAccountSync(); // keep a signed-in player's save in step with their online account
   void syncLocalBests();
   window.addEventListener('online', () => void syncLocalBests());

@@ -6,7 +6,7 @@ import { decode, encode } from '../game/saveTransfer';
 import { firebaseConfigured, getFirebase } from './firebase';
 import { syncLocalBests } from './leaderboard';
 
-// Optional accounts: a player can sign in with Google to keep their coins, cars and records online and use
+// Accounts: a player signs in (Google, email and password, or an emailed link) to keep their coins, cars and records online and use
 // them on any device. Signing in LINKS the anonymous account they already have, so it keeps its id and every
 // leaderboard score and replay stays theirs. Anonymous play keeps working exactly as before.
 
@@ -108,6 +108,22 @@ export function syncCloud(): Promise<void> {
   return syncing;
 }
 
+/** Runs after any successful sign-in: refreshes the token, remembers who it is, merges the save, tells the page. */
+async function finishSignIn(): Promise<Account> {
+  const { auth } = await getFirebase();
+  const me = auth.currentUser!;
+  await me.getIdToken(true); // the security rules need the new sign-in method in the token
+  const label = me.email ?? me.displayName ?? 'Account';
+  writeLs(LABEL_KEY, label);
+  await syncCloud();
+  void syncLocalBests(); // post any runs from this device that are still waiting to upload
+  window.dispatchEvent(new Event(SIGNED_IN_EVENT));
+  return { label };
+}
+
+/** Fired on `window` whenever someone signs in (including by clicking an emailed link in another tab load). */
+export const SIGNED_IN_EVENT = 'oversteer-signed-in';
+
 /** Opens Google sign-in. Throws on failure; the error's `code` says why. */
 export async function signInWithGoogle(): Promise<Account> {
   const { auth, authMod } = await getFirebase();
@@ -124,13 +140,54 @@ export async function signInWithGoogle(): Promise<Account> {
     if (!cred) throw e;
     await authMod.signInWithCredential(auth, cred);
   }
-  const me = auth.currentUser!;
-  await me.getIdToken(true); // the security rules need the new sign-in method in the token
-  const label = me.email ?? me.displayName ?? 'Google account';
-  writeLs(LABEL_KEY, label);
-  await syncCloud();
-  void syncLocalBests(); // post any runs from this device that are still waiting to upload
-  return { label };
+  return finishSignIn();
+}
+
+/**
+ * Email and password. `create` makes a new account (upgrading the anonymous player, so progress and scores carry
+ * over); otherwise it signs in to an existing one and this device's progress is merged into it.
+ */
+export async function signInWithPassword(email: string, password: string, create: boolean): Promise<Account> {
+  const { auth, authMod } = await getFirebase();
+  const user = auth.currentUser!;
+  if (!create) await authMod.signInWithEmailAndPassword(auth, email, password);
+  else if (user.isAnonymous) await authMod.linkWithCredential(user, authMod.EmailAuthProvider.credential(email, password));
+  else await authMod.createUserWithEmailAndPassword(auth, email, password);
+  return finishSignIn();
+}
+
+// Not under the `oversteer.` prefix: that's the save, and this is only needed until the emailed link is opened.
+const EMAIL_LINK_KEY = 'oversteerEmailForSignIn';
+
+/** Passwordless sign-in: emails a one-time link that signs the player in (and creates the account if new). */
+export async function sendEmailLink(email: string): Promise<void> {
+  const { auth, authMod } = await getFirebase();
+  await authMod.sendSignInLinkToEmail(auth, email, { url: location.origin + location.pathname, handleCodeInApp: true });
+  writeLs(EMAIL_LINK_KEY, email);
+}
+
+/** Call at startup: if the page was opened from an emailed sign-in link, finishes signing in. Returns null otherwise. */
+export async function completeEmailLinkSignIn(): Promise<Account | null> {
+  if (!firebaseConfigured || !/[?&]oobCode=/.test(location.search)) return null;
+  const { auth, authMod } = await getFirebase();
+  const href = location.href;
+  if (!authMod.isSignInWithEmailLink(auth, href)) return null;
+  // Opened on a different device or browser from the one that asked for the link: the address has to be typed again.
+  const email = readLs(EMAIL_LINK_KEY) ?? window.prompt('Confirm your email address to finish signing in')?.trim();
+  if (!email) return null;
+  const user = auth.currentUser!;
+  try {
+    if (user.isAnonymous) await authMod.linkWithCredential(user, authMod.EmailAuthProvider.credentialWithLink(email, href));
+    else await authMod.signInWithEmailLink(auth, email, href);
+  } catch (e) {
+    // This email already has an account: switch to it (this device's progress is merged in below).
+    const code = (e as { code?: string }).code;
+    if (code !== 'auth/email-already-in-use' && code !== 'auth/credential-already-in-use') throw e;
+    await authMod.signInWithEmailLink(auth, email, href);
+  }
+  writeLs(EMAIL_LINK_KEY, null);
+  history.replaceState(null, '', location.pathname); // drop the one-time code from the address bar
+  return finishSignIn();
 }
 
 /** Signs out of the account. This device keeps its progress and goes back to being an anonymous player. */
@@ -167,8 +224,14 @@ export function describeAuthError(e: unknown): string | null {
   const code = (e as { code?: string }).code ?? '';
   if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') return null;
   if (code === 'auth/popup-blocked') return 'Your browser blocked the sign-in window. Allow pop-ups for this page and try again.';
-  if (code === 'auth/operation-not-allowed') return 'Google sign-in is not turned on for this game yet.';
+  if (code === 'auth/operation-not-allowed') return 'That sign-in method is not turned on for this game yet.';
   if (code === 'auth/unauthorized-domain') return 'Sign-in is not allowed from this web address yet.';
   if (code === 'auth/network-request-failed') return 'No connection. Try again when you are online.';
+  if (code === 'auth/invalid-email') return 'That email address does not look right.';
+  if (code === 'auth/email-already-in-use') return 'That email already has an account. Use SIGN IN instead.';
+  if (code === 'auth/weak-password') return 'Choose a password of at least 6 characters.';
+  if (code === 'auth/user-not-found' || code === 'auth/wrong-password' || code === 'auth/invalid-credential') return 'Wrong email or password. New here? Use CREATE ACCOUNT.';
+  if (code === 'auth/too-many-requests') return 'Too many tries. Wait a minute and try again.';
+  if (code === 'auth/expired-action-code' || code === 'auth/invalid-action-code') return 'That sign-in link has expired or was already used. Ask for a new one.';
   return `Sign-in failed (${code.replace('auth/', '') || 'unknown error'}).`;
 }
