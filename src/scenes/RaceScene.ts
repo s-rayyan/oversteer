@@ -4,7 +4,7 @@ import { GAME_WIDTH, SceneKey } from '../game/config';
 import { GHOST_DT, getGhostMode, loadGhost, q1, saveGhostIfBest, type GhostMode } from '../game/ghost';
 import { GhostRunner } from '../game/GhostRunner';
 import { getName } from '../game/player';
-import { fetchTopGhost, syncGhost, uploadGhost, type OnlineGhost } from '../net/ghosts';
+import { fetchTopGhosts, syncGhost, uploadGhost, type OnlineGhost } from '../net/ghosts';
 import { firebaseConfigured } from '../net/firebase';
 import { selectedCar } from '../game/profile';
 import { surfaceFlags, type SurfaceFlags } from '../game/surfaces';
@@ -21,6 +21,7 @@ const WINDOW = 40; // samples searched either side of the last known position
 
 const MINE_TINT = 0xbfe9ff;
 const TOP_TINT = 0xffd166;
+const PODIUM_TINTS = [0xffd166, 0xdfe6ee, 0xe0985a]; // gold, silver, bronze for TOP 3
 const shortName = (n: string) => n.slice(0, 8).toUpperCase();
 
 /** Circuit race: N laps, lap timing, personal bests. */
@@ -46,6 +47,8 @@ export class RaceScene extends DriveScene {
   private mine: GhostRunner | null = null;
   private top: GhostRunner | null = null;
   private topInfo: OnlineGhost | null = null;
+  /** TOP 3 mode: the 2nd and 3rd fastest replays (the fastest is `top`). */
+  private chasers: { info: OnlineGhost; runner: GhostRunner; delta: Phaser.GameObjects.Text }[] = [];
   private topStatus: 'loading' | 'ready' | 'none' | 'error' | 'offline' = 'loading';
   private ghostMode: GhostMode = 'mine';
   private runToken = 0; // lets a late network reply tell it belongs to a scene that has since restarted
@@ -94,20 +97,30 @@ export class RaceScene extends DriveScene {
     this.mine = local ? new GhostRunner(this, local, MINE_TINT) : null;
     this.top = null;
     this.topInfo = null;
+    this.chasers = [];
     this.ghostMode = getGhostMode();
     this.topStatus = firebaseConfigured ? 'loading' : 'offline';
     if (firebaseConfigured && this.useGhosts) {
-      void fetchTopGhost(board).then((t) => {
+      const want = this.ghostMode === 'top3' ? 3 : 1;
+      void fetchTopGhosts(board, want).then((list) => {
         if (token !== this.runToken || !this.scene.isActive()) return;
-        if (t === 'error' || !t) {
-          this.topStatus = t === 'error' ? 'error' : 'none';
-          if (this.ghostMode === 'top') this.showFlash(t === 'error' ? "CAN'T REACH ONLINE GHOST - RACING YOUR BEST" : 'NO ONLINE GHOST YET - RACING YOUR BEST', 2400);
+        if (list === 'error' || !list.length) {
+          this.topStatus = list === 'error' ? 'error' : 'none';
+          if (this.ghostMode === 'top' || this.ghostMode === 'top3') this.showFlash(list === 'error' ? "CAN'T REACH ONLINE GHOSTS - RACING YOUR BEST" : 'NO ONLINE GHOST YET - RACING YOUR BEST', 2400);
           return;
         }
+        const t = list[0];
         this.topInfo = t;
-        this.top = new GhostRunner(this, t.ghost, TOP_TINT);
+        this.top = new GhostRunner(this, t.ghost, want > 1 ? PODIUM_TINTS[0] : TOP_TINT);
+        const small = { fontFamily: 'monospace', fontSize: '8px', color: '#ffffff', stroke: '#14121f', strokeThickness: 2 };
+        this.chasers = list.slice(1).map((info, i) => ({
+          info,
+          runner: new GhostRunner(this, info.ghost, PODIUM_TINTS[i + 1]),
+          delta: this.add.text(GAME_WIDTH / 2, 35 + i * 10, '', small).setOrigin(0.5, 0).setScrollFactor(0).setDepth(100),
+        }));
         this.topStatus = 'ready';
-        if (this.ghostMode !== 'mine' && this.ghostMode !== 'off') this.showFlash(`RACING ${shortName(t.name)}  ${formatTime(t.ghost.time)}`, 2200);
+        if (this.ghostMode === 'top3') this.showFlash(`RACING TOP ${list.length}  ${list.map((g) => shortName(g.name)).join(' ')}`, 2600);
+        else if (this.ghostMode !== 'mine' && this.ghostMode !== 'off') this.showFlash(`RACING ${shortName(t.name)}  ${formatTime(t.ghost.time)}`, 2200);
       });
       if (local) void syncGhost(board, getName(), local); // make sure the player's own best run is online too
     }
@@ -171,14 +184,15 @@ export class RaceScene extends DriveScene {
     const mode = this.ghostMode;
     // "Top player" with no online ghost available falls back to your own best run.
     const topGone = !this.top && this.topStatus !== 'loading';
-    const showMine = mode === 'mine' || mode === 'both' || (mode === 'top' && topGone);
-    const showTop = mode === 'top' || mode === 'both';
+    const showMine = mode === 'mine' || mode === 'both' || ((mode === 'top' || mode === 'top3') && topGone);
+    const showTop = mode === 'top' || mode === 'top3' || mode === 'both';
     const show = (text: Phaser.GameObjects.Text, label: string, d: number | null) => {
       if (d === null) text.setText('');
       else text.setText(`${label} ${d > 0 ? '+' : '-'}${Math.abs(d).toFixed(2)}`).setColor(d > 0 ? '#e63946' : '#52b788');
     };
     show(this.deltaMine, 'BEST', this.mine?.update(this.raceTime, this.maxTotal, showMine, racing) ?? null);
-    show(this.deltaTop, 'TOP', this.top?.update(this.raceTime, this.maxTotal, showTop, racing) ?? null);
+    show(this.deltaTop, mode === 'top3' ? '#1' : 'TOP', this.top?.update(this.raceTime, this.maxTotal, showTop, racing) ?? null);
+    this.chasers.forEach((c, i) => show(c.delta, `#${i + 2}`, c.runner.update(this.raceTime, this.maxTotal, mode === 'top3', racing)));
   }
 
   /** Called when the car crosses the line for the k-th time (k=0: start of lap 1). */
@@ -266,7 +280,9 @@ export class RaceScene extends DriveScene {
     if (m === 'off') return [];
     const out: string[] = [];
     if ((m === 'mine' || m === 'both') && this.mine) out.push(`vs MY BEST  ${formatTime(this.mine.data.time)}`);
-    if (m === 'top' || m === 'both') {
+    if (m === 'top3' && this.topStatus === 'ready' && this.topInfo) {
+      for (const [i, g] of [this.topInfo, ...this.chasers.map((c) => c.info)].entries()) out.push(`#${i + 1} ${shortName(g.name)}  ${formatTime(g.ghost.time)}`);
+    } else if (m === 'top' || m === 'top3' || m === 'both') {
       out.push(this.topStatus === 'ready' && this.topInfo
         ? `vs ${shortName(this.topInfo.name)}  ${formatTime(this.topInfo.ghost.time)}`
         : this.topStatus === 'loading' ? 'vs TOP: loading...' : this.topStatus === 'error' ? 'vs TOP: offline' : 'vs TOP: none yet');

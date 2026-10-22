@@ -44,7 +44,7 @@ export function decodeFrames(data: string): number[] | null {
 // Pressing R restarts the race and reloads the scene, which used to download the top replay again every time.
 // Keep it for a few minutes instead (each download is a read, and replays are the biggest documents we have).
 const TOP_TTL_MS = 5 * 60_000;
-const topCache = new Map<string, { at: number; ghost: OnlineGhost | null }>();
+const topCache = new Map<string, { at: number; ghosts: OnlineGhost[] }>();
 /** Boards whose replay backfill has already been checked this session. */
 const synced = new Set<string>();
 
@@ -56,7 +56,7 @@ export async function uploadGhost(board: string, name: string, g: GhostData): Pr
   await fs.setDoc(fs.doc(db, 'boards', board, 'ghosts', uid), {
     uid, name, time: Math.round(g.time * 1000), carId: g.carId, data, updatedAt: fs.serverTimestamp(),
   });
-  topCache.delete(board); // it may be the new fastest
+  for (const k of topCache.keys()) if (k.startsWith(`${board}:`)) topCache.delete(k); // it may be a new top time
   return true;
 }
 
@@ -82,23 +82,31 @@ export async function syncGhost(board: string, name: string, local: GhostData): 
   }
 }
 
-/** The fastest replay anyone has uploaded for this track; null if there isn't one yet; 'error' if we couldn't reach the server. */
-export async function fetchTopGhost(board: string): Promise<OnlineGhost | null | 'error'> {
-  if (!firebaseConfigured) return null;
+/** The fastest `n` replays anyone has uploaded for this track (fewer if fewer exist); 'error' if we couldn't reach the server. */
+export async function fetchTopGhosts(board: string, n: number): Promise<OnlineGhost[] | 'error'> {
+  if (!firebaseConfigured) return [];
   if (typeof navigator !== 'undefined' && navigator.onLine === false) return 'error';
-  const hit = topCache.get(board);
-  if (hit && Date.now() - hit.at < TOP_TTL_MS) return hit.ghost;
+  const cacheKey = `${board}:${n}`;
+  const hit = topCache.get(cacheKey);
+  if (hit && Date.now() - hit.at < TOP_TTL_MS) return hit.ghosts;
   try {
     const { db, fs } = await getFirebase();
-    const snap = await fs.getDocs(fs.query(fs.collection(db, 'boards', board, 'ghosts'), fs.orderBy('time', 'asc'), fs.limit(1)));
-    const d = snap.docs[0]?.data();
-    const frames = d ? decodeFrames(String(d.data)) : null;
-    const ghost = d && frames
-      ? { uid: String(d.uid), name: String(d.name), ghost: { time: (d.time as number) / 1000, carId: String(d.carId), frames } }
-      : null;
-    topCache.set(board, { at: Date.now(), ghost });
-    return ghost;
+    const snap = await fs.getDocs(fs.query(fs.collection(db, 'boards', board, 'ghosts'), fs.orderBy('time', 'asc'), fs.limit(n)));
+    const ghosts: OnlineGhost[] = [];
+    for (const doc of snap.docs) {
+      const d = doc.data();
+      const frames = decodeFrames(String(d.data));
+      if (frames) ghosts.push({ uid: String(d.uid), name: String(d.name), ghost: { time: (d.time as number) / 1000, carId: String(d.carId), frames } });
+    }
+    topCache.set(cacheKey, { at: Date.now(), ghosts });
+    return ghosts;
   } catch {
     return 'error';
   }
+}
+
+/** The fastest replay anyone has uploaded for this track; null if there isn't one yet; 'error' if we couldn't reach the server. */
+export async function fetchTopGhost(board: string): Promise<OnlineGhost | null | 'error'> {
+  const r = await fetchTopGhosts(board, 1);
+  return r === 'error' ? r : r[0] ?? null;
 }

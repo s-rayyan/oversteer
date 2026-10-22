@@ -33,10 +33,10 @@ export function saveGhostIfBest(trackId: string, run: GhostData): boolean {
   }
 }
 
-/** Which replays race alongside you: your best run (default), the fastest online run, both, or none. */
-export type GhostMode = 'mine' | 'top' | 'both' | 'off';
-export const GHOST_MODES: GhostMode[] = ['mine', 'top', 'both', 'off'];
-export const GHOST_MODE_LABEL: Record<GhostMode, string> = { mine: 'MY BEST', top: 'TOP PLAYER', both: 'MY BEST + TOP', off: 'OFF' };
+/** Which replays race alongside you: your best run (default), the fastest online run, the three fastest online runs, both, or none. */
+export type GhostMode = 'mine' | 'top' | 'top3' | 'both' | 'off';
+export const GHOST_MODES: GhostMode[] = ['mine', 'top', 'top3', 'both', 'off'];
+export const GHOST_MODE_LABEL: Record<GhostMode, string> = { mine: 'MY BEST', top: 'TOP PLAYER', top3: 'TOP 3', both: 'MY BEST + TOP', off: 'OFF' };
 
 const MODE_KEY = 'oversteer.ghostmode.v1';
 
