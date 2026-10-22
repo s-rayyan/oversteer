@@ -96,6 +96,7 @@ export abstract class DriveScene extends Phaser.Scene {
   private skidDrawn = 0;
   private sparks!: Phaser.GameObjects.Particles.ParticleEmitter;
   protected wasBoosting = false;
+  private lastBoostTip = -Infinity;
   private uiCam!: Phaser.Cameras.Scene2D.Camera;
   private pendingUi: Phaser.GameObjects.GameObject[] = [];
   private vignette!: Phaser.GameObjects.Image;
@@ -232,6 +233,7 @@ export abstract class DriveScene extends Phaser.Scene {
     const kb = this.input.keyboard!;
     this.keys = kb.addKeys('up,down,left,right,w,a,s,d,space,shift,z,x,comma') as typeof this.keys;
     kb.on('keydown-ESC', () => this.togglePause());
+    kb.on('keydown-SPACE', () => { if (this.state === 'racing' && !this.autoDrive && (this.keys.up.isDown || this.keys.down.isDown || this.keys.left.isDown || this.keys.right.isDown)) this.boostTip(); });
     const nav = (d: number) => this.overlay.visible && this.overlay.move(d);
     kb.on('keydown-UP', () => nav(-1));
     kb.on('keydown-DOWN', () => nav(1));
@@ -385,6 +387,13 @@ export abstract class DriveScene extends Phaser.Scene {
       this.rumble(0.4, 0.5, 200);
     }
     if (tier >= 3) this.confetti(30);
+  }
+
+  /** Many keyboards drop SPACE while arrow keys are held, so point players at Z (shown at most every 20s). */
+  private boostTip(): void {
+    if (performance.now() - this.lastBoostTip < 20000) return;
+    this.lastBoostTip = performance.now();
+    this.showFlash('USE Z TO BOOST WITH ARROW KEYS', 2800, '#ffd166');
   }
 
   protected shake(ms: number, intensity: number): void {
@@ -552,6 +561,7 @@ export abstract class DriveScene extends Phaser.Scene {
         audio.sfx('go');
         this.tweens.add({ targets: this.hint, alpha: 0, delay: 5000, duration: 800 }); // hints fade once you're racing
         this.time.delayedCall(700, () => this.banner.setText(''));
+        if (!this.autoDrive) this.time.delayedCall(1200, () => this.boostTip());
       } else {
         this.banner.setText(String(Math.ceil(this.countdown)));
         const n = Math.ceil(this.countdown);
