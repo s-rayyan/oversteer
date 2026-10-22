@@ -18,7 +18,7 @@ import { audio } from '../game/audio';
 import { CHALLENGES, freshRun, type Challenge, type RunStats } from '../game/challenges';
 import { paintedKey } from '../game/carTexture';
 
-type KeyName = 'up' | 'down' | 'left' | 'right' | 'w' | 'a' | 's' | 'd' | 'space' | 'shift' | 'x' | 'comma';
+type KeyName = 'up' | 'down' | 'left' | 'right' | 'w' | 'a' | 's' | 'd' | 'space' | 'shift' | 'z' | 'x' | 'comma';
 export type DriveState = 'countdown' | 'racing' | 'finished';
 
 export interface Spawn {
@@ -230,7 +230,7 @@ export abstract class DriveScene extends Phaser.Scene {
     this.cameras.main.centerOn(this.camPos.x, this.camPos.y);
 
     const kb = this.input.keyboard!;
-    this.keys = kb.addKeys('up,down,left,right,w,a,s,d,space,shift,x,comma') as typeof this.keys;
+    this.keys = kb.addKeys('up,down,left,right,w,a,s,d,space,shift,z,x,comma') as typeof this.keys;
     kb.on('keydown-ESC', () => this.togglePause());
     const nav = (d: number) => this.overlay.visible && this.overlay.move(d);
     kb.on('keydown-UP', () => nav(-1));
@@ -279,7 +279,7 @@ export abstract class DriveScene extends Phaser.Scene {
     this.keyDebug = this.add.text(GAME_WIDTH / 2, 48, '', { ...text, color: '#9ad1ff' }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(100).setVisible(false);
     kb.on('keydown-K', () => this.keyDebug.setVisible(!this.keyDebug.visible));
     this.coinText = this.add.text(GAME_WIDTH / 2, 4, '', text).setOrigin(0.5, 0).setScrollFactor(0).setDepth(100);
-    this.hint = this.add.text(4, GAME_HEIGHT - 4, this.autoDrive ? 'AUTO THROTTLE + BOOST  X handbrake  R restart  M mute' : 'SPACE boost  X handbrake  R restart  M mute', { ...text, color: '#c9d1e3' })
+    this.hint = this.add.text(4, GAME_HEIGHT - 4, this.autoDrive ? 'AUTO THROTTLE + BOOST  X handbrake  R restart  M mute' : 'SPACE/Z boost  X handbrake  R restart  M mute', { ...text, color: '#c9d1e3' })
       .setOrigin(0, 1).setScrollFactor(0).setDepth(100);
     this.mini = new MiniMap(this, this.mapStatic());
     this.heatMeter = new HeatMeter(this);
@@ -519,7 +519,7 @@ export abstract class DriveScene extends Phaser.Scene {
     if (this.state === 'racing') {
       throttle = this.axis([k.down, k.s], [k.up, k.w]);
       steer = this.axis([k.left, k.a], [k.right, k.d]);
-      boosting = (k.space.isDown || k.shift.isDown) && this.boost > 0;
+      boosting = (k.space.isDown || k.shift.isDown || k.z.isDown) && this.boost > 0;
       handbrake = k.x.isDown || k.comma.isDown;
       if (pad) {
         // A gamepad works alongside the keyboard: left stick or d-pad steers, triggers drive, A / RB boost, X / B / LB handbrake.
