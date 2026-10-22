@@ -14,6 +14,8 @@ export const SceneKey = {
   Tutorial: 'TutorialScene',
   Challenges: 'ChallengesScene',
   Style: 'StyleScene',
+  Pvp: 'PvpScene',
+  PvpLobby: 'PvpLobbyScene',
 } as const;
 
 /**

@@ -3,7 +3,7 @@ import { GAME_WIDTH, GAME_HEIGHT } from './game/config';
 import { addFpsMeter } from './game/fpsMeter';
 import { initAccountSync } from './net/account';
 import { syncLocalBests } from './net/leaderboard';
-import { isEmbedded, moveToHome, onOldAddress, receiveSave, showLauncher } from './game/saveTransfer';
+import { isEmbedded, moveToHome, onFirebaseHost, onOldAddress, receiveSave, showLauncher } from './game/saveTransfer';
 import { BootScene } from './scenes/BootScene';
 import { ChallengesScene } from './scenes/ChallengesScene';
 import { StyleScene } from './scenes/StyleScene';
@@ -13,6 +13,8 @@ import { LeaderboardScene } from './scenes/LeaderboardScene';
 import { MenuScene } from './scenes/MenuScene';
 import { EndlessScene } from './scenes/EndlessScene';
 import { OversteerScene } from './scenes/OversteerScene';
+import { PvpLobbyScene } from './scenes/PvpLobbyScene';
+import { PvpScene } from './scenes/PvpScene';
 import { RaceScene } from './scenes/RaceScene';
 import { TitleScene } from './scenes/TitleScene';
 import { TutorialScene } from './scenes/TutorialScene';
@@ -33,7 +35,7 @@ function start(): void {
       mode: Phaser.Scale.FIT,
       autoCenter: Phaser.Scale.CENTER_BOTH,
     },
-    scene: [BootScene, TitleScene, MenuScene, RaceScene, EndlessScene, OversteerScene, LeaderboardScene, GarageScene, TutorialScene, ChallengesScene, StyleScene],
+    scene: [BootScene, TitleScene, MenuScene, RaceScene, EndlessScene, OversteerScene, LeaderboardScene, GarageScene, TutorialScene, ChallengesScene, StyleScene, PvpLobbyScene, PvpScene],
   });
 
   // Catch up any scores earned while offline, now and whenever the connection returns.
@@ -56,8 +58,9 @@ function start(): void {
   if (import.meta.env.DEV) (window as unknown as { __game: Phaser.Game }).__game = game;
 }
 
-// Inside the game hub's iframe, show a launcher that moves the player's save into its own tab.
+// Inside the game hub's iframe, show a launcher that moves the player's save into its own tab. (A copy uploaded to a
+// portal such as itch.io is embedded too, but it keeps its own save and just plays.)
 // Opened directly, first take in any save being handed over, then start the game.
-if (isEmbedded()) showLauncher(start);
+if (isEmbedded() && onFirebaseHost()) showLauncher(start);
 else if (onOldAddress()) void moveToHome(start); // old web address: silently carry the save to the home one
 else void receiveSave().then(start);

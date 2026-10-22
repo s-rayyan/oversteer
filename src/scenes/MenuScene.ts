@@ -40,6 +40,7 @@ export class MenuScene extends Phaser.Scene {
   private typeTag!: Phaser.GameObjects.Text;
   private driver!: Phaser.GameObjects.Text;
   private ghostChip!: Phaser.GameObjects.Text;
+  private pvpChip!: Phaser.GameObjects.Text;
   private pips: Phaser.GameObjects.Text[] = [];
   private medalTag!: Phaser.GameObjects.Text;
   private medalLine!: Phaser.GameObjects.Text;
@@ -97,6 +98,10 @@ export class MenuScene extends Phaser.Scene {
     this.ghostChip = this.add.text(24, 152, '', { ...mono, fontSize: '8px', color: '#bfe9ff', backgroundColor: '#1d1b2e', padding: { x: 4, y: 3 } })
       .setInteractive({ useHandCursor: true }).on('pointerdown', () => this.cycleGhost());
 
+    // Race other players live on the selected track; click it (or press V).
+    this.pvpChip = this.add.text(106, 152, 'PVP RACE [V]', { ...mono, fontSize: '8px', color: '#ffd166', backgroundColor: '#1d1b2e', padding: { x: 4, y: 3 } })
+      .setInteractive({ useHandCursor: true }).on('pointerdown', () => this.startPvp());
+
     this.add.rectangle(PREVIEW.x, PREVIEW.y, PREVIEW.w, PREVIEW.h, 0x1d1b2e).setOrigin(0).setStrokeStyle(1, 0x3d405b);
     this.preview = this.add.graphics();
     this.previewText = this.add.text(PREVIEW.x + PREVIEW.w / 2, PREVIEW.y + PREVIEW.h / 2, '', { ...mono, fontSize: '8px', align: 'center', color: '#c9d1e3' }).setOrigin(0.5);
@@ -127,10 +132,18 @@ export class MenuScene extends Phaser.Scene {
     kb.on('keydown-C', () => this.scene.start(SceneKey.Challenges));
     kb.on('keydown-N', () => void this.changeName());
     kb.on('keydown-T', () => this.cycleGhost());
+    kb.on('keydown-V', () => this.startPvp());
     this.events.once('shutdown', () => kb.removeAllListeners());
 
     this.refresh();
     if (!getName()) void this.changeName(false);
+  }
+
+  private startPvp(): void {
+    if (this.tab >= ENDLESS_TAB) return;
+    lastTab = this.tab;
+    lastTrack = this.row;
+    this.scene.start(SceneKey.PvpLobby, { trackId: this.tracksInTab()[this.row].id });
   }
 
   private cycleGhost(): void {
@@ -206,6 +219,7 @@ export class MenuScene extends Phaser.Scene {
     });
 
     this.ghostChip.setText(`GHOST: ${GHOST_MODE_LABEL[getGhostMode()]}`).setVisible(this.tab < ENDLESS_TAB);
+    this.pvpChip.setVisible(this.tab < ENDLESS_TAB);
     this.preview.clear();
     this.classInfo.setText('');
     this.typeTag.setText('');

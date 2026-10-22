@@ -90,6 +90,58 @@ service cloud.firestore {
       }
     }
 
+    // Head-to-head races. rooms/{code} is the lobby and roster; rooms/{code}/live/{uid} is each driver's car position,
+    // rewritten a few times a second while racing. Finish times are reported by the drivers themselves (the same caveat
+    // as the leaderboard: the rules only bound them), and a race pays coins by finishing place, not by time.
+    match /rooms/{room} {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null
+        && request.resource.data.keys().hasOnly(['track', 'host', 'public', 'status', 'createdAt', 'startedAt', 'players'])
+        && request.resource.data.host == request.auth.uid
+        && request.resource.data.track is string && request.resource.data.track.size() <= 24
+        && request.resource.data.public is bool
+        && request.resource.data.status == 'lobby'
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.startedAt == null
+        && request.resource.data.players.keys().hasOnly([request.auth.uid])
+        && request.resource.data.players.size() == 1
+        && validMember(request.resource.data.players[request.auth.uid]);
+      allow update: if request.auth != null && (
+        // join, heartbeat or leave: while in the lobby, only our own roster entry changes, and the room holds at most 4
+        (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['players'])
+          && resource.data.status == 'lobby'
+          && request.resource.data.players.diff(resource.data.players).affectedKeys().hasOnly([request.auth.uid])
+          && request.resource.data.players.size() <= 4
+          && (!(request.auth.uid in request.resource.data.players) || validMember(request.resource.data.players[request.auth.uid])))
+        // start: a driver in the room, with at least one opponent, flips it to racing
+        || (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'startedAt'])
+          && resource.data.status == 'lobby'
+          && request.resource.data.status == 'racing'
+          && request.resource.data.startedAt == request.time
+          && request.auth.uid in resource.data.players
+          && resource.data.players.size() >= 2));
+      allow delete: if false;
+
+      function validMember(m) {
+        return m.keys().hasOnly(['name', 'carId', 'at'])
+          && m.name is string && m.name.matches('^[A-Za-z0-9 _.-]{1,12}$')
+          && m.carId is string && m.carId.size() <= 24
+          && m.at is int;
+      }
+
+      match /live/{uid} {
+        allow read: if request.auth != null;
+        allow create, update: if request.auth != null && request.auth.uid == uid
+          && request.resource.data.keys().hasOnly(['x', 'y', 'h', 'p', 't', 'd', 'at'])
+          && request.resource.data.x is number && request.resource.data.y is number
+          && request.resource.data.h is number && request.resource.data.p is number
+          && (request.resource.data.t == null || (request.resource.data.t is int && request.resource.data.t >= 12000 && request.resource.data.t < 3600000))
+          && request.resource.data.d is bool
+          && request.resource.data.at is int;
+        allow delete: if false;
+      }
+    }
+
     // Optional online account save: users/{auth uid}. Only its owner can read or write it, and only once
     // signed in with Google (not as an anonymous player).
     match /users/{uid} {
