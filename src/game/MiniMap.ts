@@ -69,7 +69,7 @@ export class MiniMap {
     }
   }
 
-  update(carX: number, carY: number, nearby: Pt[], markers: Pt[] = [], now = 0): void {
+  update(carX: number, carY: number, nearby: Pt[], markers: Pt[] = [], now = 0, racers: Array<{ x: number; y: number; color: number }> = []): void {
     this.dot.clear();
     let p: Pt;
     if (this.fit) {
@@ -97,6 +97,12 @@ export class MiniMap {
       const x = Math.round(Math.min(Math.max(q.x, this.x + 2), this.x + BOX.w - 3));
       const y = Math.round(Math.min(Math.max(q.y, this.y + 2), this.y + BOX.h - 3));
       this.dot.fillStyle(0xffffff).fillRect(x - 2, y - 2, 5, 5).fillStyle(flash).fillRect(x - 1, y - 1, 3, 3);
+    }
+    if (this.fit) {
+      for (const r of racers) {
+        const q = this.toBox(r.x, r.y);
+        this.dot.fillStyle(0xffffff).fillRect(q.x - 2, q.y - 2, 5, 5).fillStyle(r.color).fillRect(q.x - 1, q.y - 1, 3, 3);
+      }
     }
     this.dot.fillStyle(0xffd166).fillRect(p.x - 1, p.y - 1, 3, 3);
   }

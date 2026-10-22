@@ -26,18 +26,20 @@ const shortName = (n: string) => n.slice(0, 8).toUpperCase();
 /** Circuit race: N laps, lap timing, personal bests. */
 export class RaceScene extends DriveScene {
   protected calm = true;
-  private track!: TrackDef;
-  private samples: RoadPt[] = [];
+  /** Ghost cars and the online top replay; off for head-to-head races. */
+  protected useGhosts = true;
+  protected track!: TrackDef;
+  protected samples: RoadPt[] = [];
   private flags: SurfaceFlags[] = [];
-  private idx = 0;
-  private total = 0; // signed samples travelled relative to the start line
-  private maxTotal = 0;
-  private lapStart = 0;
-  private lapTimes: number[] = [];
-  private bestLap = Infinity;
-  private finishPayout = 0;
-  private finished = false; // for the challenge stats
-  private medalWon = 0;
+  protected idx = 0;
+  protected total = 0; // signed samples travelled relative to the start line
+  protected maxTotal = 0;
+  protected lapStart = 0;
+  protected lapTimes: number[] = [];
+  protected bestLap = Infinity;
+  protected finishPayout = 0;
+  protected finished = false; // for the challenge stats
+  protected medalWon = 0;
   private medalGoal: { name: string; color: string; time: number } | null = null;
 
   // Ghosts: your best run, and the fastest uploaded run; plus a recording of this one.
@@ -52,8 +54,8 @@ export class RaceScene extends DriveScene {
   private deltaMine!: Phaser.GameObjects.Text;
   private deltaTop!: Phaser.GameObjects.Text;
 
-  constructor() {
-    super(SceneKey.Race);
+  constructor(key: string = SceneKey.Race) {
+    super(key);
   }
 
   init(data: { trackId?: string }): void {
@@ -88,13 +90,13 @@ export class RaceScene extends DriveScene {
     this.nextRec = 0;
     const board = this.track.id;
     const token = ++this.runToken;
-    const local = loadGhost(board);
+    const local = this.useGhosts ? loadGhost(board) : null;
     this.mine = local ? new GhostRunner(this, local, MINE_TINT) : null;
     this.top = null;
     this.topInfo = null;
     this.ghostMode = getGhostMode();
     this.topStatus = firebaseConfigured ? 'loading' : 'offline';
-    if (firebaseConfigured) {
+    if (firebaseConfigured && this.useGhosts) {
       void fetchTopGhost(board).then((t) => {
         if (token !== this.runToken || !this.scene.isActive()) return;
         if (t === 'error' || !t) {
@@ -115,7 +117,7 @@ export class RaceScene extends DriveScene {
     return this.pointAt(this.idx);
   }
 
-  private pointAt(i: number): Spawn {
+  protected pointAt(i: number): Spawn {
     const n = this.samples.length;
     const p = this.samples[i];
     const q = this.samples[(i + 3) % n];
@@ -201,7 +203,7 @@ export class RaceScene extends DriveScene {
     }
   }
 
-  private finishRace(): void {
+  protected finishRace(): void {
     const bestThisRun = Math.min(...this.lapTimes);
     const oldMedal = medalFor(this.track.id, getRecord(this.track.id).best);
     const r = submitRace(this.track.id, this.raceTime, bestThisRun);
@@ -239,7 +241,7 @@ export class RaceScene extends DriveScene {
     void this.submitOnline(Math.round(this.raceTime * 1000), async () => ((await uploadGhost(this.track.id, getName(), run)) ? 'Ghost uploaded' : undefined));
   }
 
-  private lapNumber(): number {
+  protected lapNumber(): number {
     return Phaser.Math.Clamp(Math.floor(this.maxTotal / this.samples.length) + 1, 1, this.track.laps);
   }
 

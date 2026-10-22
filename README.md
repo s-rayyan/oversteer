@@ -34,6 +34,24 @@ Back restarts (and it rumbles when you drift, boost or crash).
 - Confetti and a banner for new records and new bests; the profile save gained `paints`, `smokes` and `done` lists, merged
   as unions (`saveMerge.ts`, tested by `npm run test:merge`).
 
+## PvP races (online)
+
+Pick a circuit in the menu and press **V** (or click **PVP RACE**). **Quick match** drops you into a room for that track with
+whoever else is looking (a public room starts 8 s after a second driver arrives, or at once with **ENTER**; four drivers
+max). **Private room** makes a 5-character code for friends, and **Join with code** takes one; the host starts it.
+
+Everyone drives their own car and sees the others as live cars (no collisions) with a running order, minimap dots and a
+results panel. Pays coins by place (1st 1.5x, 2nd 1x, 3rd/4th 0.5x of the track's race pay); it never touches records,
+medals, ghosts or the leaderboards. There are no pauses or restarts mid-race.
+
+How it works (`src/net/pvp.ts`, `src/scenes/PvpLobbyScene.ts`, `src/scenes/PvpScene.ts`): a room is one Firestore document
+(`rooms/{code}`: roster, status) plus a `rooms/{code}/live/{uid}` document per driver that is rewritten ~7 times a second with
+the car's position and progress. Finish times are reported by the drivers, so, as with the leaderboard, the rules only bound
+them. **Deploy the updated `firestore.rules` before this works online.** Old rooms are never deleted; add a Firestore TTL
+policy on a field if the collection grows.
+
+To try it without Firebase, open two tabs of a dev build at `/?pvp=local`: the same code runs over localStorage.
+
 ## Global leaderboard (Firebase)
 
 The game works without Firebase (records stay in your browser). To enable the global leaderboard:

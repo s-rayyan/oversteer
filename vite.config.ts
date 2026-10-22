@@ -1,9 +1,11 @@
 import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vite';
+import { viteSingleFile } from 'vite-plugin-singlefile';
 
-export default defineConfig(({ command }) => ({
+export default defineConfig(({ command, mode }) => ({
   base: './',
-  plugins: [],
+  // `npm run build:single` (mode 'single') inlines everything into one index.html in dist-single/.
+  plugins: mode === 'single' ? [viteSingleFile()] : [],
   // Production builds use a slimmer Phaser without physics, tilemaps and sound (see src/vendor/phaser-lite.js).
   resolve: command === 'build'
     ? { alias: [{ find: /^phaser$/, replacement: fileURLToPath(new URL('./src/vendor/phaser-lite.js', import.meta.url)) }] }
@@ -22,11 +24,13 @@ export default defineConfig(({ command }) => ({
     : {},
   build: {
     chunkSizeWarningLimit: 1500,
-    rollupOptions: {
-      output: {
-        manualChunks: (id) => (id.includes('node_modules/phaser') || id.includes('src/vendor/phaser-lite') ? 'phaser' : undefined),
+    ...(mode === 'single' ? { outDir: 'dist-single' } : {
+      rollupOptions: {
+        output: {
+          manualChunks: (id) => (id.includes('node_modules/phaser') || id.includes('src/vendor/phaser-lite') ? 'phaser' : undefined),
+        },
       },
-    },
+    }),
   },
   server: { port: 5173 },
 }));

@@ -19,6 +19,15 @@ export function isEmbedded(): boolean {
 }
 
 /**
+ * True when this copy is served from Firebase Hosting. Only that copy, when embedded by the game hub, sends its
+ * players to the standalone game; a build uploaded to a portal (itch.io, CrazyGames) is embedded by design and just plays.
+ */
+export function onFirebaseHost(): boolean {
+  const h = location.hostname;
+  return h.endsWith('.web.app') || h.endsWith('.firebaseapp.com');
+}
+
+/**
  * True on an old address of the game: a Firebase Hosting site that isn't the home one. Local development
  * and any other host are left alone.
  */

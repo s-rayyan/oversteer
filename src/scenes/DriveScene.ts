@@ -67,7 +67,7 @@ export abstract class DriveScene extends Phaser.Scene {
 
   private keys!: Record<KeyName, Phaser.Input.Keyboard.Key>;
   private hud!: Phaser.GameObjects.Text;
-  private hint!: Phaser.GameObjects.Text;
+  protected hint!: Phaser.GameObjects.Text;
   private mini!: MiniMap;
   private heatMeter!: HeatMeter;
   private banner!: Phaser.GameObjects.Text;
@@ -100,7 +100,9 @@ export abstract class DriveScene extends Phaser.Scene {
   private pendingUi: Phaser.GameObjects.GameObject[] = [];
   private vignette!: Phaser.GameObjects.Image;
   private zoom = 1;
-  private countdown = 3;
+  protected countdown = 3;
+  /** False when the world can't be frozen (online races): ESC then opens a menu without stopping the car. */
+  protected pausable = true;
   /** Seconds of countdown before the race starts. */
   protected countdownFrom = 3;
   /** False in practice modes, which pay no coins. */
@@ -118,7 +120,7 @@ export abstract class DriveScene extends Phaser.Scene {
   private lostTimer = 0;
   protected driftBank = 0; // collected this run
   private paidCoins = 0;
-  private finishCfg: { title: string; lines: string[] } | null = null;
+  private finishCfg: { title: string; lines: string[]; base: number } | null = null;
 
   /** Build the world; return where the car starts. */
   protected abstract setupWorld(): Spawn;
@@ -134,6 +136,11 @@ export abstract class DriveScene extends Phaser.Scene {
   protected mapMarkers(): Pt[] {
     return [];
   }
+  /** Other drivers (online races), drawn as coloured dots on the minimap. */
+  protected mapRacers(): Array<{ x: number; y: number; color: number }> {
+    return [];
+  }
+
   protected mapNearby(): Pt[] {
     return [];
   }
@@ -241,7 +248,7 @@ export abstract class DriveScene extends Phaser.Scene {
     const onHide = () => { if (document.visibilityState === 'hidden') flush(); };
     window.addEventListener('pagehide', flush);
     document.addEventListener('visibilitychange', onHide);
-    const autoPause = () => { if (this.state === 'racing' && !this.paused) this.togglePause(); };
+    const autoPause = () => { if (this.pausable && this.state === 'racing' && !this.paused) this.togglePause(); };
     this.game.events.on(Phaser.Core.Events.BLUR, autoPause);
     const saver = this.time.addEvent({ delay: 8000, loop: true, callback: flush });
     this.events.once('shutdown', () => {
@@ -393,7 +400,7 @@ export abstract class DriveScene extends Phaser.Scene {
   /** End of run: the car coasts while the results panel is up (it appears after `delay` ms, e.g. for a slow-motion crash). */
   protected finish(title: string, lines: string[], delay = 0): void {
     this.state = 'finished';
-    this.finishCfg = { title, lines: [...lines] };
+    this.finishCfg = { title, lines: [...lines], base: lines.length };
     audio.stopRun();
     const goals = this.checkGoals();
     if (goals.length === 1) this.finishCfg.lines.push(`GOAL: ${goals[0].title.slice(0, 36)}  +${goals[0].reward}`);
@@ -405,9 +412,22 @@ export abstract class DriveScene extends Phaser.Scene {
     });
   }
 
+  /** Replaces the result lines (keeping any goal lines added by finish()) and redraws the panel if it is up. */
+  protected setFinishLines(head: string[]): void {
+    if (!this.finishCfg) return;
+    this.finishCfg.lines = [...head, ...this.finishCfg.lines.slice(this.finishCfg.base)];
+    this.finishCfg.base = head.length;
+    if (this.overlay.visible) this.showFinish(this.overlay.selected);
+  }
+
   private showFinish(selected: number): void {
     const cfg = this.finishCfg!;
     this.overlay.show(cfg.title, cfg.lines, this.finishEntries(), selected);
+  }
+
+  /** Menu entries (besides Resume) when the world can't be paused. */
+  protected leaveEntries(): OverlayEntry[] {
+    return [{ label: this.restartLabel, action: () => this.restart() }];
   }
 
   /** Buttons on the end-of-run panel. */
@@ -460,6 +480,15 @@ export abstract class DriveScene extends Phaser.Scene {
 
   private togglePause(): void {
     if (this.state === 'finished') return;
+    if (!this.pausable) {
+      if (this.overlay.visible) return this.overlay.hide();
+      const info = this.pauseInfo();
+      this.overlay.show(info.title, info.lines, [
+        { label: 'Resume', action: () => this.overlay.hide() },
+        ...this.leaveEntries(),
+      ]);
+      return;
+    }
     if (this.paused) {
       this.paused = false;
       audio.setPaused(false);
@@ -513,6 +542,7 @@ export abstract class DriveScene extends Phaser.Scene {
         this.goalClock = 0;
         this.checkGoals();
       }
+
     } else if (this.state === 'countdown') {
       this.countdown -= dt;
       if (this.countdown <= 0) {
@@ -578,7 +608,7 @@ export abstract class DriveScene extends Phaser.Scene {
       const down = (Object.entries(this.keys) as Array<[string, Phaser.Input.Keyboard.Key]>).filter(([, key]) => key.isDown).map(([name]) => name.toUpperCase());
       this.keyDebug.setText(`KEYS: ${down.join(' ') || '-'}`);
     }
-    this.mini.update(this.car.x, this.car.y, this.mapNearby(), this.mapMarkers(), this.time.now);
+    this.mini.update(this.car.x, this.car.y, this.mapNearby(), this.mapMarkers(), this.time.now, this.mapRacers());
     this.heatMeter.update(this.car.heat);
     this.afterUpdate(dt);
   }
