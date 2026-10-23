@@ -75,6 +75,8 @@ export abstract class DriveScene extends Phaser.Scene {
   private smoke!: Phaser.GameObjects.Particles.ParticleEmitter;
   private dust!: Phaser.GameObjects.Particles.ParticleEmitter;
   private flame!: Phaser.GameObjects.Particles.ParticleEmitter;
+  /** Low graphics mode: two reused sprites that flicker behind the car instead of a particle emitter. */
+  private lowFlame: Phaser.GameObjects.Image[] = [];
   private boostGfx!: Phaser.GameObjects.Graphics;
   protected boost = 0; // 0..1
   /** What has happened this run, for challenges (see challenges.ts). Modes add their own through modeStats(). */
@@ -221,6 +223,7 @@ export abstract class DriveScene extends Phaser.Scene {
       lifespan: 220, speed: { min: 20, max: 50 }, scale: { start: 1.4, end: 0 },
       alpha: { start: 1, end: 0 }, tint: [0xffd166, 0xf4a261, 0xe63946], emitting: false,
     }).setDepth(9);
+    this.lowFlame = [0xe63946, 0xffd166].map((tint) => this.add.image(0, 0, 'spark').setDepth(9).setTint(tint).setVisible(false));
     this.sparks = this.add.particles(0, 0, 'spark', {
       lifespan: 350, speed: { min: 40, max: 110 }, scale: { start: 1, end: 0 },
       alpha: { start: 1, end: 0 }, tint: [0xfff1b8, 0xffd166], emitting: false,
@@ -394,6 +397,17 @@ export abstract class DriveScene extends Phaser.Scene {
     if (performance.now() - this.lastBoostTip < 20000) return;
     this.lastBoostTip = performance.now();
     this.showFlash('USE Z TO BOOST WITH ARROW KEYS', 2800, '#ffd166');
+  }
+
+  /** A flickering two-tone flame from just two sprites, so slow computers still see when boost is on. */
+  private showLowFlame(on: boolean): void {
+    this.lowFlame.forEach((f, i) => {
+      f.setVisible(on);
+      if (!on) return;
+      const len = (i === 0 ? 3.6 : 2.2) + Math.random() * 1.4; // outer red tongue, inner yellow core
+      const p = this.car.point(-7 - len * 1.5, 0);
+      f.setPosition(p.x, p.y).setRotation(this.car.facing).setScale(len, i === 0 ? 1.7 : 1);
+    });
   }
 
   protected shake(ms: number, intensity: number): void {
@@ -594,8 +608,12 @@ export abstract class DriveScene extends Phaser.Scene {
     if (boosting) {
       this.boost = drainBoost(this.boost, this.stats, dt);
       const p = this.car.point(-8, 0);
-      if (!quality.low) this.flame.emitParticleAt(p.x, p.y, 2);
-    }
+      if (quality.low) this.showLowFlame(true);
+      else {
+        this.flame.emitParticleAt(p.x, p.y, 2);
+        if (this.lowFlame[0]?.visible) this.showLowFlame(false); // switched back to full effects mid-boost
+      }
+    } else if (this.lowFlame[0]?.visible) this.showLowFlame(false);
     this.effects(off, dt);
     this.pickUpPad(off);
     this.trackDrift(off, dt);
