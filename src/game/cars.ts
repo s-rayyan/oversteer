@@ -140,7 +140,7 @@ const CAR_LIST: CarDef[] = [
   },
   {
     id: 'rocket', name: 'Rocket', blurb: 'Absurd top speed. Steering optional.', price: 2500, carClass: 'speedster', color: 0xf1faee, size: [18, 8], stripe: 0xe63946,
-    stats: { ...BASE, maxSpeed: 175, accel: 163, turnRate: 1.8, grip: 2.2, boostSpeed: 1.35, boostCharge: 0.6, boostDrain: 0.23 },
+    stats: { ...BASE, maxSpeed: 175, accel: 163, turnRate: 1.8, grip: 2.2, boostSpeed: 1.372, boostCharge: 0.6, boostDrain: 0.23 },
   },
   {
     id: 'phantom', name: 'Phantom', blurb: 'Precise and fast. Rewards clean drifts.', price: 3200, carClass: 'gripracer', color: 0x3a0ca3, size: [17, 9], stripe: 0xc77dff,
