@@ -44,7 +44,7 @@ export const CAR_CLASSES: Record<CarClassId, CarClass> = {
   gripracer: {
     id: 'gripracer', label: 'GRIP RACER', color: '#4895ef',
     blurb: 'Huge grip. Wins on technical tracks.',
-    matches: (s) => s.grip >= 3.5 && s.turnRate < 3.0 && s.boostCharge <= 0.7 && s.offRoadCap < 0.8 && s.maxSpeed < 160,
+    matches: (s) => s.grip >= 3.5 && s.turnRate < 3.0 && s.boostCharge <= 0.7 && s.offRoadCap < 0.8 && s.maxSpeed < 170,
   },
   drifter: {
     id: 'drifter', label: 'DRIFTER', color: '#f4a261',
@@ -144,7 +144,7 @@ const CAR_LIST: CarDef[] = [
   },
   {
     id: 'phantom', name: 'Phantom', blurb: 'Precise and fast. Rewards clean drifts.', price: 3200, carClass: 'gripracer', color: 0x3a0ca3, size: [17, 9], stripe: 0xc77dff,
-    stats: { ...BASE, maxSpeed: 158, accel: 160, turnRate: 2.53, grip: 4.8, boostCharge: 0.7, boostDrain: 0.265 },
+    stats: { ...BASE, maxSpeed: 163, accel: 160, turnRate: 2.53, grip: 4.8, boostCharge: 0.7, boostDrain: 0.265 },
   },
   {
     id: 'comet', name: 'Comet', blurb: 'Darts through corners and burns on boost.', price: 4200, carClass: 'agile', color: 0x00b4d8, size: [17, 9], stripe: 0xffffff,
