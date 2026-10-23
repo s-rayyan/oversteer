@@ -8,6 +8,11 @@ const KEY = 'oversteerFpsShown';
 const ABOVE_BOTTOM = 14;
 const SLOW_FPS = 40; // below this...
 const SLOW_TICKS = 6; // ...for this many readings in a row (3 s) turns low effects on
+const FAST_FPS = 52; // at or above this, with low effects on...
+const FAST_TICKS = 20; // ...for this many readings in a row (10 s) turns full effects back on
+const FAST_TICKS_MAX = 240; // each time full effects bounce straight back to slow, wait twice as long (up to 2 min)
+const BOUNCE_MS = 30_000; // slow again within this long of switching back up counts as a bounce
+const SETTLED_MS = 60_000; // full effects held this long: forget past bounces
 const TICK_MS = 500;
 const HISTORY = 40; // readings in the little graph (20 s)
 const GRAPH_W = 40;
@@ -43,7 +48,8 @@ function store(on: boolean): void {
  * those writes from making the browser re-lay out anything else. It lives inside the game's parent element so it
  * also shows in fullscreen, and it names the renderer: "Canvas" on a slow computer means the browser isn't giving
  * the game a graphics card. If the frame rate stays low for a few seconds the game switches to low effects by
- * itself (Q flips it back).
+ * itself, and back to full effects once it has run fast for a while (backing off if that makes it slow again).
+ * Q flips it by hand, and a hand-picked setting is left alone.
  */
 export function addFpsMeter(game: Phaser.Game): void {
   const parent = game.canvas.parentElement ?? document.body;
@@ -93,6 +99,10 @@ export function addFpsMeter(game: Phaser.Game): void {
   const history: number[] = [];
   let on = load();
   let slow = 0;
+  let fast = 0;
+  let fastNeeded = FAST_TICKS;
+  let autoLow = false; // low effects were switched on by the game, so it may switch them off again (Q makes it manual)
+  let raisedAt = 0;
   let shown = { fps: -1, low: !quality.low, on: false }; // starts hidden; the first refresh shows it if it's on
 
   const drawGraph = () => {
@@ -112,9 +122,27 @@ export function addFpsMeter(game: Phaser.Game): void {
   const refresh = () => {
     const fps = Math.round(game.loop.actualFps);
     // Only judge a running game (a hidden tab stops drawing, and scene changes hiccup for a moment).
-    if (!document.hidden && fps < SLOW_FPS && game.scene.getScenes(true).some((s) => 'car' in s)) slow++;
+    const running = !document.hidden && game.scene.getScenes(true).some((s) => 'car' in s);
+    if (running && fps < SLOW_FPS) slow++;
     else slow = 0;
-    if (slow >= SLOW_TICKS && !quality.low) setLowQuality(true);
+    if (slow >= SLOW_TICKS && !quality.low) {
+      if (raisedAt && performance.now() - raisedAt < BOUNCE_MS) fastNeeded = Math.min(fastNeeded * 2, FAST_TICKS_MAX);
+      setLowQuality(true);
+      autoLow = true;
+      fast = 0;
+    } else if (quality.low && autoLow) {
+      // A fast computer again (plugged in, other tabs closed): go back to full effects.
+      fast = running && fps >= FAST_FPS ? fast + 1 : 0;
+      if (fast >= fastNeeded) {
+        setLowQuality(false);
+        autoLow = false;
+        raisedAt = performance.now();
+        fast = 0;
+        slow = 0;
+      }
+    } else if (!quality.low && raisedAt && performance.now() - raisedAt > SETTLED_MS) {
+      fastNeeded = FAST_TICKS;
+    }
 
     if (document.hidden) return;
     history.push(fps);
@@ -152,7 +180,9 @@ export function addFpsMeter(game: Phaser.Game): void {
       refresh();
     } else if (k === 'q') {
       setLowQuality(!quality.low);
+      autoLow = false; // a hand-picked setting stays until Q is pressed again
       slow = 0;
+      fast = 0;
       refresh();
     }
   });
