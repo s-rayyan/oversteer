@@ -144,7 +144,7 @@ const CAR_LIST: CarDef[] = [
   },
   {
     id: 'phantom', name: 'Phantom', blurb: 'Precise and fast. Rewards clean drifts.', price: 3200, carClass: 'gripracer', color: 0x3a0ca3, size: [17, 9], stripe: 0xc77dff,
-    stats: { ...BASE, maxSpeed: 172, accel: 160, turnRate: 2.53, grip: 4.8, boostSpeed: 1.35, boostCharge: 0.7, boostDrain: 0.265 },
+    stats: { ...BASE, maxSpeed: 172, accel: 148, turnRate: 2.53, grip: 4.8, boostSpeed: 1.35, boostCharge: 0.7, boostDrain: 0.265 },
   },
   {
     id: 'comet', name: 'Comet', blurb: 'Darts through corners and burns on boost.', price: 4200, carClass: 'agile', color: 0x00b4d8, size: [17, 9], stripe: 0xffffff,
