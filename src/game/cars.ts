@@ -148,7 +148,7 @@ const CAR_LIST: CarDef[] = [
   },
   {
     id: 'comet', name: 'Comet', blurb: 'Darts through corners and burns on boost.', price: 4200, carClass: 'agile', color: 0x00b4d8, size: [17, 9], stripe: 0xffffff,
-    stats: { ...BASE, maxSpeed: 165, accel: 150, turnRate: 3.3, grip: 2.6, boostCharge: 1.1, boostDrain: 0.28, boostSpeed: 1.39, padGain: 0.9 },
+    stats: { ...BASE, maxSpeed: 168, accel: 170, turnRate: 3.3, grip: 2.6, boostCharge: 1.1, boostDrain: 0.35, boostSpeed: 1.39, offRoadCap: 0.6, padGain: 0.9 },
   },
   {
     id: 'legend', name: 'Legend', blurb: 'The best car in the game. Gold paint included.', price: 6500, carClass: 'hypercar', color: 0xd4af37, size: [18, 9], stripe: 0x14121f,
