@@ -16,6 +16,7 @@
     "benchmark": "node scripts/benchmark.ts",
     "test:merge": "node scripts/testSaveMerge.ts",
     "test:cloud": "node scripts/testCloudMerge.ts",
+    "test:interp": "node scripts/testInterp.ts",
     "check:rules": "node scripts/checkRules.ts",
     "medals": "node scripts/genMedals.ts"
   },

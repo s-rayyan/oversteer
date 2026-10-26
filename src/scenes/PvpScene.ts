@@ -1,16 +1,17 @@
 import Phaser from 'phaser';
 import { RACE_PAY } from '../game/cars';
-import { SceneKey } from '../game/config';
+import { GAME_HEIGHT, SceneKey } from '../game/config';
 import { audio } from '../game/audio';
 import type { RunStats } from '../game/challenges';
 import { formatClock, formatTime } from '../game/records';
 import type { OverlayEntry } from '../game/ui';
+import { SnapshotBuffer } from '../game/netInterp';
+import { realtimeConfigured } from '../net/firebase';
 import { pvp, type Live, type Member } from '../net/pvp';
 import { RaceScene } from './RaceScene';
 
-const SEND_MS = 150; // how often our position is broadcast (~7 a second)
-const LAG_CAP = 0.3; // seconds an opponent is extrapolated ahead of their last update
-const SMOOTH = 14; // how fast a drawn opponent chases where it should be (per second)
+// How often our position is broadcast: 10 a second over the Realtime Database; the Firestore fallback bills per write, so slower.
+const SEND_MS = realtimeConfigured ? 100 : 200;
 const GONE_MS = 7000; // no updates for this long and they've dropped out
 const CLEAR_DELAY_MS = 15000; // how long our live record lingers after we leave the race
 const GRACE_MS = 2200; // after we cross the line, wait this long for a finish report that is still in flight
@@ -26,8 +27,8 @@ interface Opponent {
   sprite: Phaser.GameObjects.Image;
   label: Phaser.GameObjects.Text;
   x: number; y: number; h: number; // where it is drawn
-  tx: number; ty: number; th: number; // last reported
-  vx: number; vy: number;
+  /** Their recent positions; the car is drawn slightly in the past, tweened between two of them. */
+  buf: SnapshotBuffer;
   seenAt: number; // when the last update arrived (performance.now)
   progress: number;
   /** Reported finish time in seconds. */
@@ -54,6 +55,8 @@ export class PvpScene extends RaceScene {
   private place = 0;
   private resolved = false;
   private panelText = '';
+  private ping = 0; // smoothed round trip to the online service, ms
+  private pingText: Phaser.GameObjects.Text | null = null;
 
   constructor() {
     super(SceneKey.Pvp);
@@ -87,6 +90,8 @@ export class PvpScene extends RaceScene {
     this.lastSend = 0;
     super.create();
     this.hint.setText('SPACE boost  X handbrake  ENTER respawn  M mute');
+    this.ping = 0;
+    this.pingText = this.add.text(4, GAME_HEIGHT - 16, '', { fontFamily: 'monospace', fontSize: '7px', color: '#8d99ae', stroke: '#14121f', strokeThickness: 2 }).setScrollFactor(0).setDepth(100);
 
     const uids = Object.keys(this.roster).sort();
     uids.forEach((uid, slot) => {
@@ -98,7 +103,7 @@ export class PvpScene extends RaceScene {
         fontFamily: 'monospace', fontSize: '7px', color: SLOT_CSS[slot], stroke: '#14121f', strokeThickness: 2,
       }).setOrigin(0.5).setDepth(9.9).setVisible(false);
       this.opps.set(uid, {
-        uid, slot, name: m.name, sprite, label, x: 0, y: 0, h: 0, tx: 0, ty: 0, th: 0, vx: 0, vy: 0,
+        uid, slot, name: m.name, sprite, label, x: 0, y: 0, h: 0, buf: new SnapshotBuffer(),
         seenAt: 0, progress: -Infinity, fin: null, out: false, seen: false,
       });
     });
@@ -120,34 +125,22 @@ export class PvpScene extends RaceScene {
     const o = this.opps.get(uid);
     if (!o) return;
     const now = performance.now();
-    if (o.seen) {
-      const dt = Math.max(0.05, (now - o.seenAt) / 1000);
-      o.vx = Phaser.Math.Clamp((s.x - o.tx) / dt, -900, 900);
-      o.vy = Phaser.Math.Clamp((s.y - o.ty) / dt, -900, 900);
-    } else {
-      o.x = s.x; o.y = s.y; o.h = s.h;
-      o.seen = true;
-    }
-    o.tx = s.x; o.ty = s.y; o.th = s.h;
+    o.buf.add({ t: s.at, x: s.x, y: s.y, h: s.h }, Date.now());
+    o.seen = true;
     o.seenAt = now;
     o.progress = s.p;
     o.out = s.d && s.t === null;
     if (s.t !== null && o.fin === null) o.fin = s.t / 1000;
   }
 
-  private moveOpponents(dt: number): void {
+  private moveOpponents(): void {
     const now = performance.now();
-    const k = 1 - Math.exp(-SMOOTH * dt);
+    const wall = Date.now();
     for (const o of this.opps.values()) {
       if (!o.seen) continue;
       if (o.fin === null && !o.out && this.state === 'racing' && now - o.seenAt > GONE_MS) o.out = true;
-      const age = Math.min((now - o.seenAt) / 1000, LAG_CAP);
-      const gx = o.tx + (o.fin === null ? o.vx * age : 0);
-      const gy = o.ty + (o.fin === null ? o.vy * age : 0);
-      if (Phaser.Math.Distance.Between(o.x, o.y, gx, gy) > 300) { o.x = gx; o.y = gy; }
-      o.x += (gx - o.x) * k;
-      o.y += (gy - o.y) * k;
-      o.h += Phaser.Math.Angle.Wrap(o.th - o.h) * k;
+      const at = o.buf.sample(wall);
+      if (at) { o.x = at.x; o.y = at.y; o.h = at.h; }
       o.sprite.setPosition(o.x, o.y).setRotation(o.h).setVisible(!o.out).setAlpha(o.fin !== null ? 0.6 : 1);
       o.label.setPosition(o.x, o.y - 13).setVisible(!o.out);
     }
@@ -159,7 +152,13 @@ export class PvpScene extends RaceScene {
       x: Math.round(this.car.x * 10) / 10, y: Math.round(this.car.y * 10) / 10, h: Math.round(this.car.facing * 1000) / 1000,
       p: this.maxTotal, t, d: gone, at: Date.now(),
     };
-    void pvp().push(this.roomId, s).catch(() => undefined);
+    const sent = performance.now();
+    // The write resolves once the server has it, so the time that takes is a round trip to the online service.
+    void pvp().push(this.roomId, s).then(() => {
+      const rtt = performance.now() - sent;
+      this.ping = this.ping === 0 ? rtt : this.ping + (rtt - this.ping) * 0.2;
+      this.pingText?.setText(`PING ${Math.round(this.ping)}ms`).setColor(this.ping < 100 ? '#52b788' : this.ping < 200 ? '#ffd166' : '#e63946');
+    }).catch(() => undefined);
   }
 
   // ---- running order ----
@@ -179,9 +178,8 @@ export class PvpScene extends RaceScene {
   }
 
   protected afterUpdate(): void {
-    const dt = this.game.loop.delta / 1000;
     super.afterUpdate();
-    this.moveOpponents(dt);
+    this.moveOpponents();
 
     const now = performance.now();
     const sending = this.state !== 'finished' || (this.finishedAt && now - this.finishedAt < 1500);
