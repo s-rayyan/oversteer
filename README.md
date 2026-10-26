@@ -53,11 +53,19 @@ policy on a field if the collection grows.
 Live car positions can go in the Realtime Database instead of Firestore, which is far cheaper at ~7 updates a second per driver: enable it in the Firebase console, put its URL in `VITE_FIREBASE_DATABASE_URL`, and run `firebase deploy --only database`. Without the variable, positions fall back to Firestore.
 
 **Lobby alerts and clean-up.** Opening a public room also overwrites one document, `lobbyBeacon/latest`; every signed-in
-client watches it (one read per room opened) and shows a toast: a clickable one in menus, a small silent note mid-race.
+client watches it (one read per room opened) and shows a banner with a JOIN button (or press **J**), in menus and mid-race
+alike (joining mid-race leaves that race, so it is always the player's choice; the banner times out by itself).
 Players can switch it off under ONLINE RACE > ALERTS. Each driver deletes their own Realtime Database record 15 s after
 leaving a race. Rooms carry an `expireAt` timestamp: in the Firebase console, Firestore > Indexes > TTL, add a policy on
 collection group `rooms`, field `expireAt`, to have old rooms deleted automatically. **Deploy `firestore.rules` before
 the new build**, or room creation is refused.
+
+**Open matches, who is online, challenges.** ONLINE RACE has an **OPEN MATCHES** page (public lobbies on any track, ENTER
+to join, C to challenge the host) and a **WHO IS ONLINE** page (ENTER or C to challenge, LEFT/RIGHT picks the track).
+A challenge opens a private room and sends the other player a banner (ACCEPT / DECLINE, or J). Presence
+(`presence/{uid}`) and invitations (`challenges/{target}/{from}`) live in the Realtime Database (`src/net/social.ts`),
+so they need `VITE_FIREBASE_DATABASE_URL` and **`firebase deploy --only database`** to publish the new rules. Open
+matches is just a query on `rooms` and needs no new rules.
 
 To try it without Firebase, open two tabs of a dev build at `/?pvp=local`: the same code runs over localStorage.
 

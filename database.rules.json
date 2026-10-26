@@ -8,14 +8,76 @@
         "$uid": {
           ".write": "auth != null && auth.uid === $uid",
           ".validate": "newData.hasChildren(['x', 'y', 'h', 'p', 'd', 'at'])",
-          "x": { ".validate": "newData.isNumber()" },
-          "y": { ".validate": "newData.isNumber()" },
-          "h": { ".validate": "newData.isNumber()" },
-          "p": { ".validate": "newData.isNumber()" },
-          "t": { ".validate": "newData.val() == null || (newData.isNumber() && newData.val() >= 12000 && newData.val() < 3600000 && newData.val() % 1 == 0)" },
-          "d": { ".validate": "newData.isBoolean()" },
-          "at": { ".validate": "newData.isNumber()" },
-          "$other": { ".validate": false }
+          "x": {
+            ".validate": "newData.isNumber()"
+          },
+          "y": {
+            ".validate": "newData.isNumber()"
+          },
+          "h": {
+            ".validate": "newData.isNumber()"
+          },
+          "p": {
+            ".validate": "newData.isNumber()"
+          },
+          "t": {
+            ".validate": "newData.val() == null || (newData.isNumber() && newData.val() >= 12000 && newData.val() < 3600000 && newData.val() % 1 == 0)"
+          },
+          "d": {
+            ".validate": "newData.isBoolean()"
+          },
+          "at": {
+            ".validate": "newData.isNumber()"
+          },
+          "$other": {
+            ".validate": false
+          }
+        }
+      }
+    },
+    "presence": {
+      ".read": "auth != null",
+      "$uid": {
+        ".write": "auth != null && auth.uid === $uid",
+        ".validate": "newData.hasChildren(['name', 'at'])",
+        "name": {
+          ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 12"
+        },
+        "car": {
+          ".validate": "newData.isString() && newData.val().length <= 24"
+        },
+        "st": {
+          ".validate": "newData.isString() && (newData.val() == 'menu' || newData.val() == 'lobby' || newData.val() == 'racing')"
+        },
+        "at": {
+          ".validate": "newData.isNumber()"
+        },
+        "$other": {
+          ".validate": false
+        }
+      }
+    },
+    "challenges": {
+      "$target": {
+        ".read": "auth != null && auth.uid === $target",
+        "$from": {
+          ".write": "auth != null && (auth.uid === $from || (auth.uid === $target && !newData.exists()))",
+          ".validate": "newData.hasChildren(['name', 'room', 'track', 'at'])",
+          "name": {
+            ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 12"
+          },
+          "room": {
+            ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 8"
+          },
+          "track": {
+            ".validate": "newData.isString() && newData.val().length <= 24"
+          },
+          "at": {
+            ".validate": "newData.isNumber()"
+          },
+          "$other": {
+            ".validate": false
+          }
         }
       }
     }

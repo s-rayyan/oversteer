@@ -75,6 +75,8 @@ interface Backend {
   beat(id: string): Promise<void>;
   start(id: string): Promise<void>;
   findOpen(track: string, exceptId?: string): Promise<Room | null>;
+  /** Every public lobby that is still worth joining, newest first, on any track. */
+  listOpen(): Promise<Room[]>;
   watch(id: string, cb: (room: Room | null) => void): () => void;
   push(id: string, s: Live): Promise<void>;
   /** Remove our own live record once the race is over, so finished races leave nothing behind. */
@@ -98,7 +100,7 @@ export function livePlayers(room: Room, now = Date.now()): Array<[string, Member
   return Object.entries(room.players).filter(([, m]) => now - m.at < PRESENCE_MS).sort(([a], [b]) => (a < b ? -1 : 1));
 }
 
-const joinable = (r: Room, now: number) =>
+export const joinable = (r: Room, now: number) =>
   r.status === 'lobby' && r.public && now - r.createdAt < ROOM_FRESH_MS && Object.keys(r.players).length < ROOM_MAX && livePlayers(r, now).length > 0;
 
 /** The oldest room worth joining (ties broken by code), so two lone hosts looking at each other pick the same one. */
@@ -172,6 +174,15 @@ const firestore: Backend = {
     const snap = await fs.getDocs(fs.query(fs.collection(db, 'rooms'),
       fs.where('track', '==', track), fs.where('status', '==', 'lobby'), fs.where('public', '==', true), fs.limit(12)));
     return pickOpen(snap.docs.map((d) => toRoom(d.id, d.data({ serverTimestamps: 'estimate' }))), exceptId);
+  },
+
+  async listOpen() {
+    const { db, fs } = await getFirebase();
+    // Only the createdAt field is filtered and ordered, so no composite index is needed; status and the rest are checked here.
+    const cutoff = fs.Timestamp.fromMillis(Date.now() - ROOM_FRESH_MS);
+    const snap = await fs.getDocs(fs.query(fs.collection(db, 'rooms'), fs.where('createdAt', '>', cutoff), fs.orderBy('createdAt', 'desc'), fs.limit(30)));
+    const now = Date.now();
+    return snap.docs.map((d) => toRoom(d.id, d.data({ serverTimestamps: 'estimate' }))).filter((r) => joinable(r, now));
   },
 
   watch(id, cb) {
@@ -332,6 +343,15 @@ const local: Backend = {
     }
     return pickOpen(rooms, exceptId);
   },
+  async listOpen() {
+    const rooms: Room[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      const r = k?.startsWith(`${P}room.`) ? lsGet<Room>(k) : null;
+      if (r && joinable(r, Date.now())) rooms.push(r);
+    }
+    return rooms.sort((a, b) => b.createdAt - a.createdAt);
+  },
   watch(id, cb) {
     const key = `${P}room.${id}`;
     const l = (k: string) => { if (k === key) cb(lsGet<Room>(key)); };
@@ -365,6 +385,9 @@ const local: Backend = {
 
 const useLocal = (): boolean =>
   import.meta.env.DEV && typeof location !== 'undefined' && new URLSearchParams(location.search).get('pvp') === 'local';
+
+/** True in the dev-only two-tabs mode (`?pvp=local`). */
+export const pvpIsLocal = useLocal;
 
 /** Online play needs the Firebase project (or the dev-only local mode). */
 export const pvpAvailable = (): boolean => useLocal() || firebaseConfigured;

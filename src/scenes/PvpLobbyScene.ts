@@ -15,9 +15,11 @@ const HOP_CHECK_MS = 5000;
 
 type Mode = 'menu' | 'busy' | 'room';
 
-const OPTIONS = ['QUICK MATCH', 'PRIVATE ROOM', 'JOIN WITH CODE', 'ALERTS'] as const;
+const OPTIONS = ['QUICK MATCH', 'OPEN MATCHES', 'WHO IS ONLINE', 'PRIVATE ROOM', 'JOIN WITH CODE', 'ALERTS'] as const;
 const OPTION_HINT = [
   'Race whoever is looking for this track.',
+  'See every room waiting for drivers, on any track.',
+  'See who is playing and challenge them.',
   'Make a room and share its code with friends.',
   'Type a friend\'s room code.',
   'Get a note when someone opens a public room.',
@@ -28,6 +30,8 @@ export class PvpLobbyScene extends Phaser.Scene {
   private track!: TrackDef;
   private auto: 'quick' | null = null;
   private joinCode: string | null = null;
+  /** Set when we came here by challenging someone: the name we are waiting to accept. */
+  private waitFor: string | null = null;
   private mode: Mode = 'menu';
   private sel = 0;
   private roomId: string | null = null;
@@ -48,10 +52,11 @@ export class PvpLobbyScene extends Phaser.Scene {
     super(SceneKey.PvpLobby);
   }
 
-  init(data: { trackId?: string; auto?: 'quick'; joinCode?: string }): void {
+  init(data: { trackId?: string; auto?: 'quick'; joinCode?: string; waitFor?: string }): void {
     this.track = TRACKS.find((t) => t.id === data.trackId) ?? TRACKS[0];
     this.auto = data.auto ?? null;
     this.joinCode = data.joinCode ?? null;
+    this.waitFor = data.waitFor ?? null;
   }
 
   create(): void {
@@ -124,7 +129,7 @@ export class PvpLobbyScene extends Phaser.Scene {
     this.mode = 'menu';
     this.status.setText('Pick how to race').setColor('#ffd166');
     OPTIONS.forEach((label, i) => {
-      const t = this.add.text(GAME_WIDTH / 2, 70 + i * 20, label, { fontFamily: 'monospace', fontSize: '10px', color: '#ffffff' })
+      const t = this.add.text(GAME_WIDTH / 2, 62 + i * 16, label, { fontFamily: 'monospace', fontSize: '10px', color: '#ffffff' })
         .setOrigin(0.5).setInteractive({ useHandCursor: true })
         .on('pointerover', () => { this.sel = i; this.paintMenu(); })
         .on('pointerdown', () => { this.sel = i; this.confirm(); });
@@ -151,8 +156,10 @@ export class PvpLobbyScene extends Phaser.Scene {
   private confirm(): void {
     if (this.mode === 'menu') {
       if (this.sel === 0) void this.quickMatch();
-      else if (this.sel === 1) void this.createRoom(false);
-      else if (this.sel === 2) void this.joinWithCode();
+      else if (this.sel === 1) this.scene.start(SceneKey.PvpBrowse, { trackId: this.track.id });
+      else if (this.sel === 2) this.scene.start(SceneKey.PvpOnline, { trackId: this.track.id });
+      else if (this.sel === 3) void this.createRoom(false);
+      else if (this.sel === 4) void this.joinWithCode();
       else { setLobbyAlerts(!lobbyAlertsOn()); this.paintMenu(); }
     } else if (this.mode === 'room') {
       this.startNow();
@@ -358,7 +365,7 @@ export class PvpLobbyScene extends Phaser.Scene {
     (this.ui[ROOM_MAX] as Phaser.GameObjects.Text).setText(r.public ? `ROOM ${r.id}` : `PRIVATE ROOM  CODE  ${r.id}`);
     const starter = this.starter(r) === this.myUid;
     if (live.length < 2) {
-      this.status.setText(r.public ? 'Waiting for opponents...' : 'Share the code and wait for friends').setColor('#ffd166');
+      this.status.setText(this.waitFor ? `Waiting for ${this.waitFor.toUpperCase()} to accept...` : r.public ? 'Waiting for opponents...' : 'Share the code and wait for friends').setColor('#ffd166');
       this.sub.setText('');
     } else if (r.public) {
       const left = this.autoAt ? Math.max(0, Math.ceil((this.autoAt - Date.now()) / 1000)) : 0;

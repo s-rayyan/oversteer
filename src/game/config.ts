@@ -16,6 +16,8 @@ export const SceneKey = {
   Style: 'StyleScene',
   Pvp: 'PvpScene',
   PvpLobby: 'PvpLobbyScene',
+  PvpBrowse: 'PvpBrowseScene',
+  PvpOnline: 'PvpOnlineScene',
 } as const;
 
 /**
