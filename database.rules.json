@@ -46,6 +46,9 @@
         "car": {
           ".validate": "newData.isString() && newData.val().length <= 24"
         },
+        "tr": {
+          ".validate": "newData.isString() && newData.val().length <= 24"
+        },
         "st": {
           ".validate": "newData.isString() && (newData.val() == 'menu' || newData.val() == 'lobby' || newData.val() == 'racing')"
         },

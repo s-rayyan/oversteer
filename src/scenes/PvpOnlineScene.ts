@@ -13,7 +13,7 @@ export class PvpOnlineScene extends PvpListScene<Presence> {
   }
 
   protected heading(): string { return 'WHO IS ONLINE'; }
-  protected columns(): string { return '  PLAYER      CAR          STATUS'; }
+  protected columns(): string { return '  PLAYER      CAR         STATUS  TRACK'; }
   protected hintText(): string { return 'ARROWS select   ENTER challenge   LEFT/RIGHT track   ESC back'; }
   protected emptyText(): string { return 'Nobody else is online right now.'; }
 
@@ -37,7 +37,8 @@ export class PvpOnlineScene extends PvpListScene<Presence> {
   }
 
   protected line(p: Presence): string {
-    return `${p.name.toUpperCase().slice(0, 10).padEnd(11)} ${getCar(p.carId).name.slice(0, 11).padEnd(12)} ${STATUS_LABEL[p.st]}`;
+    const track = TRACKS.find((t) => t.id === p.tr)?.name.toUpperCase().slice(0, 13) ?? '';
+    return `${p.name.toUpperCase().slice(0, 10).padEnd(11)} ${getCar(p.carId).name.slice(0, 10).padEnd(11)} ${STATUS_LABEL[p.st].padEnd(7)} ${track}`;
   }
 
   protected opponent(p: Presence): { uid: string; name: string } | null {

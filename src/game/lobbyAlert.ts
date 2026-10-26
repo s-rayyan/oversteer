@@ -1,7 +1,7 @@
 import type Phaser from 'phaser';
 import { SIGNED_IN_EVENT, cachedAccount } from '../net/account';
 import { pvp, pvpAvailable, type Beacon } from '../net/pvp';
-import { clearChallenge, socialAvailable, startPresence, watchChallenges, type Challenge, type Status } from '../net/social';
+import { clearChallenge, socialAvailable, startPresence, watchChallenges, type Activity, type Challenge } from '../net/social';
 import { signInRequired } from './accountDialog';
 import { audio } from './audio';
 import { SceneKey } from './config';
@@ -51,12 +51,14 @@ export function setLobbyAlerts(on: boolean): void {
 
 const signedInEnough = (): boolean => pvpAvailable() && (!signInRequired() || !!cachedAccount());
 
-/** What the player is doing, shown next to their name on the WHO IS ONLINE page. */
-function status(): Status {
-  const active = game?.scene.getScenes(true).map((s) => s.scene.key) ?? [];
-  if (active.some((k) => RACING.has(k))) return 'racing';
-  if (active.includes(SceneKey.PvpLobby)) return 'lobby';
-  return 'menu';
+/** What the player is doing and on which track, shown on the WHO IS ONLINE page. */
+function status(): Activity {
+  const scenes = game?.scene.getScenes(true) ?? [];
+  const keys = scenes.map((s) => s.scene.key);
+  const st = keys.some((k) => RACING.has(k)) ? 'racing' : keys.includes(SceneKey.PvpLobby) ? 'lobby' : 'menu';
+  // Circuit races and the lobby carry their track; endless and OVERSTEER have none.
+  const tr = st === 'menu' ? '' : scenes.map((s) => (s as unknown as { track?: { id?: string } }).track?.id).find((id) => typeof id === 'string') ?? '';
+  return { st, tr };
 }
 
 function refresh(): void {

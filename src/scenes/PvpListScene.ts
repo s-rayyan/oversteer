@@ -54,7 +54,7 @@ export abstract class PvpListScene<T> extends Phaser.Scene {
     const mono = { fontFamily: 'monospace', fontSize: '10px', color: '#ffffff' };
     this.add.text(GAME_WIDTH / 2, 12, this.heading(), { ...mono, fontSize: '16px', color: '#ffd166' }).setOrigin(0.5);
     this.status = this.add.text(GAME_WIDTH / 2, 30, '', { ...mono, fontSize: '8px', color: '#9ad1ff' }).setOrigin(0.5);
-    this.header = this.add.text(20, TOP - 12, this.columns(), { ...mono, fontSize: '8px', color: '#8d99ae' });
+    this.header = this.add.text(20, TOP - 13, this.columns(), { ...mono, color: '#5d6580' });
     this.add.text(GAME_WIDTH / 2, GAME_HEIGHT - 8, this.hintText(), { ...mono, fontSize: '8px', color: '#8d99ae' }).setOrigin(0.5);
     for (let i = 0; i < ROWS; i++) {
       this.rows.push(this.add.text(20, TOP + i * ROW_H, '', mono)

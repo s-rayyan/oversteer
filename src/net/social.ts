@@ -17,6 +17,8 @@ export interface Presence {
   name: string;
   carId: string;
   st: Status;
+  /** The track they are racing or waiting on, or '' (menus, endless). */
+  tr: string;
   /** When the player last checked in (ms since epoch). */
   at: number;
 }
@@ -59,14 +61,21 @@ const lsKeys = (prefix: string): string[] => {
 // ---- presence ----
 
 let beatTimer = 0;
-let lastStatus: () => Status = () => 'menu';
+export interface Activity { st: Status; tr: string }
+let lastStatus: () => Activity = () => ({ st: 'menu', tr: '' });
 
 /** Checks in now (and keeps checking in) so other players see us as online. Safe to call repeatedly. */
-export function startPresence(status: () => Status): void {
+export function startPresence(status: () => Activity): void {
   lastStatus = status;
   if (!socialAvailable() || beatTimer) return;
   const beat = () => void announce().catch(() => undefined);
   beatTimer = window.setInterval(beat, BEAT_MS);
+  // Also check in the moment what we are doing changes (a race starts, a lobby opens), so the list is never 20 s behind.
+  let last = JSON.stringify(status());
+  window.setInterval(() => {
+    const now = JSON.stringify(lastStatus());
+    if (now !== last) { last = now; beat(); }
+  }, 3000);
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') beat(); });
   beat();
 }
@@ -77,15 +86,15 @@ export async function announce(): Promise<void> {
   if (!name || !socialAvailable()) return;
   const uid = await pvp().uid();
   const car = selectedCar().id;
-  const st = lastStatus();
+  const { st, tr } = lastStatus();
   if (pvpIsLocal()) {
-    localStorage.setItem(`${P}presence.${uid}`, JSON.stringify({ uid, name, carId: car, st, at: Date.now() } satisfies Presence));
+    localStorage.setItem(`${P}presence.${uid}`, JSON.stringify({ uid, name, carId: car, st, tr, at: Date.now() } satisfies Presence));
     return;
   }
   const { rtdb, rt } = await getRealtime();
   const ref = rt.ref(rtdb, `presence/${uid}`);
   void rt.onDisconnect(ref).remove().catch(() => undefined); // closing the tab takes us off the list straight away
-  await rt.set(ref, { name, car, st, at: rt.serverTimestamp() });
+  await rt.set(ref, { name, car, st, tr, at: rt.serverTimestamp() });
 }
 
 /** Calls `cb` with everyone else who is online, now and whenever it changes. Returns a function that stops it. */
@@ -111,8 +120,8 @@ export function watchOnline(cb: (players: Presence[]) => void): () => void {
       const unsub = rt.onValue(rt.ref(rtdb, 'presence'), (snap) => {
         latest = [];
         snap.forEach((child) => {
-          const v = child.val() as { name?: string; car?: string; st?: Status; at?: number } | null;
-          if (child.key && v && typeof v.name === 'string') latest.push({ uid: child.key, name: v.name, carId: v.car ?? '', st: v.st ?? 'menu', at: typeof v.at === 'number' ? v.at : 0 });
+          const v = child.val() as { name?: string; car?: string; st?: Status; tr?: string; at?: number } | null;
+          if (child.key && v && typeof v.name === 'string') latest.push({ uid: child.key, name: v.name, carId: v.car ?? '', st: v.st ?? 'menu', tr: v.tr ?? '', at: typeof v.at === 'number' ? v.at : 0 });
         });
         emit(latest);
       }, () => cb([]));
