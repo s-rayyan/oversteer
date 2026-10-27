@@ -53,6 +53,7 @@ export function submitRace(id: string, total: number, bestLap: number): { newBes
   if (newLap) r.bestLap = bestLap;
   save(s);
   if (newBest) queueUpload(id, Math.round(total * 1000));
+  if (newLap) queueUpload(`lap:${id}`, Math.round(bestLap * 1000));
   return { newBest, newLap };
 }
 

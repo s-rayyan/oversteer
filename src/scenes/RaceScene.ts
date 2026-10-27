@@ -4,6 +4,7 @@ import { GAME_WIDTH, SceneKey } from '../game/config';
 import { GHOST_DT, getGhostMode, loadGhost, q1, saveGhostIfBest, type GhostMode } from '../game/ghost';
 import { GhostRunner } from '../game/GhostRunner';
 import { getName } from '../game/player';
+import { lapBoard, submitScore } from '../net/leaderboard';
 import { fetchTopGhosts, syncGhost, uploadGhost, type OnlineGhost } from '../net/ghosts';
 import { firebaseConfigured } from '../net/firebase';
 import { selectedCar } from '../game/profile';
@@ -221,6 +222,7 @@ export class RaceScene extends DriveScene {
     const bestThisRun = Math.min(...this.lapTimes);
     const oldMedal = medalFor(this.track.id, getRecord(this.track.id).best);
     const r = submitRace(this.track.id, this.raceTime, bestThisRun);
+    const newLap = r.newLap;
     this.finished = true;
     this.medalWon = medalFor(this.track.id, this.raceTime);
     const lines = [`Laps  ${this.lapTimes.map((t) => t.toFixed(2)).join('  ')}`];
@@ -252,7 +254,8 @@ export class RaceScene extends DriveScene {
     }
     this.finish('FINISHED', lines);
     const run = { time: this.raceTime, carId: selectedCar().id, frames: this.rec };
-    void this.submitOnline(Math.round(this.raceTime * 1000), async () => ((await uploadGhost(this.track.id, getName(), run)) ? 'Ghost uploaded' : undefined));
+    void this.submitOnline(Math.round(this.raceTime * 1000), async () => ((await uploadGhost(this.track.id, getName(), run)) ? 'Ghost uploaded' : undefined))
+      .then(() => (newLap ? submitScore(lapBoard(this.track.id), getName(), Math.round(bestThisRun * 1000)).catch(() => undefined) : undefined));
   }
 
   protected lapNumber(): number {

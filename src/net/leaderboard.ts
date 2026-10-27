@@ -13,6 +13,9 @@ export interface ScoreRow {
   value: number;
 }
 
+/** Best single lap on a track lives on its own board, `lap:{trackId}` (milliseconds, lower is better). */
+export const lapBoard = (trackId: string): string => `lap:${trackId}`;
+
 /** Race boards store milliseconds (lower is better); endless stores metres (higher is better). */
 export const higherIsBetter = (board: string): boolean => board === BOARD_ENDLESS || board === BOARD_OVERSTEER;
 
@@ -98,13 +101,13 @@ export async function renameEverywhere(name: string): Promise<void> {
   try { localStorage.setItem(RENAME_KEY, name); } catch { /* storage unavailable */ }
   try {
     const { db, uid, fs } = await getFirebase();
-    const boards = [...TRACKS.map((t) => t.id), BOARD_ENDLESS, BOARD_OVERSTEER];
+    const boards = [...TRACKS.map((t) => t.id), ...TRACKS.map((t) => lapBoard(t.id)), BOARD_ENDLESS, BOARD_OVERSTEER];
     for (const board of boards) {
       const ref = fs.doc(db, 'boards', board, 'scores', uid);
       const snap = await fs.getDoc(ref);
       if (!snap.exists()) continue;
       if (snap.data().name !== name) await fs.updateDoc(ref, { name, updatedAt: fs.serverTimestamp() });
-      if (board === BOARD_ENDLESS || board === BOARD_OVERSTEER) continue;
+      if (board === BOARD_ENDLESS || board === BOARD_OVERSTEER || board.startsWith('lap:')) continue;
       const gref = fs.doc(db, 'boards', board, 'ghosts', uid);
       const g = await fs.getDoc(gref);
       if (g.exists() && g.data().name !== name) await fs.updateDoc(gref, { name, updatedAt: fs.serverTimestamp() });

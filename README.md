@@ -28,6 +28,8 @@ Back restarts (and it rumbles when you drift, boost or crash).
   They are multiples of what the starter Hatchback's benchmark bot drives, generated into `src/game/medalTimes.ts`:
   after `npm run benchmark -- --write` run `npm run medals -- --write` (`npm run medals` checks it is current). The first
   time you reach a medal on a track it pays a bonus. Laps show a split against your best lap.
+- **Lap leaderboard:** each circuit also has a best-single-lap board (`boards/lap:{trackId}`), shown by pressing UP/DOWN on the
+  leaderboard screen. The rules cap it at a quarter of the track's minimum race time, so **deploy `firestore.rules`**.
 - **Goals** (`src/game/challenges.ts`, menu key **C**): one-off challenges that pay coins, checked automatically as you drive.
   Not paid in the tutorial.
 - **Paint shop** (`src/game/cosmetics.ts`, Garage key **P**): paint jobs and tyre-smoke colours for coins. Looks only.

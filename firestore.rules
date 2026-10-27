@@ -20,7 +20,10 @@ service cloud.firestore {
           && d.value is int
           && ((b == 'endless' || b == 'oversteer')
                 ? (d.value > 0 && d.value < 500000)               // metres
-                : (d.value >= minTime(b) && d.value < 3600000))   // race time, ms
+                : b.matches('lap:.*')
+                  // best single lap, ms: a lap can't be faster than a quarter of the track's believable race time
+                  ? (minTime(b[4:]) < 3600000 && d.value >= minTime(b[4:]) / 4 && d.value < 900000)
+                  : (d.value >= minTime(b) && d.value < 3600000))   // race time, ms
           && d.updatedAt == request.time;
       }
 
