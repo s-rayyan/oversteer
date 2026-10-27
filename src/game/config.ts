@@ -18,6 +18,7 @@ export const SceneKey = {
   PvpLobby: 'PvpLobbyScene',
   PvpBrowse: 'PvpBrowseScene',
   PvpOnline: 'PvpOnlineScene',
+  PvpChat: 'PvpChatScene',
 } as const;
 
 /**

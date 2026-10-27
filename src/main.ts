@@ -17,6 +17,7 @@ import { OversteerScene } from './scenes/OversteerScene';
 import { PvpBrowseScene } from './scenes/PvpBrowseScene';
 import { PvpLobbyScene } from './scenes/PvpLobbyScene';
 import { PvpOnlineScene } from './scenes/PvpOnlineScene';
+import { PvpChatScene } from './scenes/PvpChatScene';
 import { PvpScene } from './scenes/PvpScene';
 import { RaceScene } from './scenes/RaceScene';
 import { TitleScene } from './scenes/TitleScene';
@@ -38,7 +39,7 @@ function start(): void {
       mode: Phaser.Scale.FIT,
       autoCenter: Phaser.Scale.CENTER_BOTH,
     },
-    scene: [BootScene, TitleScene, MenuScene, RaceScene, EndlessScene, OversteerScene, LeaderboardScene, GarageScene, TutorialScene, ChallengesScene, StyleScene, PvpLobbyScene, PvpBrowseScene, PvpOnlineScene, PvpScene],
+    scene: [BootScene, TitleScene, MenuScene, RaceScene, EndlessScene, OversteerScene, LeaderboardScene, GarageScene, TutorialScene, ChallengesScene, StyleScene, PvpLobbyScene, PvpBrowseScene, PvpOnlineScene, PvpChatScene, PvpScene],
   });
 
   // Catch up any scores earned while offline, now and whenever the connection returns.

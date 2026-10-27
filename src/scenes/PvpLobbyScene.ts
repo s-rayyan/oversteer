@@ -15,11 +15,12 @@ const HOP_CHECK_MS = 5000;
 
 type Mode = 'menu' | 'busy' | 'room';
 
-const OPTIONS = ['QUICK MATCH', 'OPEN MATCHES', 'WHO IS ONLINE', 'PRIVATE ROOM', 'JOIN WITH CODE', 'ALERTS'] as const;
+const OPTIONS = ['QUICK MATCH', 'OPEN MATCHES', 'WHO IS ONLINE', 'CHAT', 'PRIVATE ROOM', 'JOIN WITH CODE', 'ALERTS'] as const;
 const OPTION_HINT = [
   'Race whoever is looking for this track.',
   'See every room waiting for drivers, on any track.',
   'See who is playing and challenge them.',
+  'Talk to everyone who is online.',
   'Make a room and share its code with friends.',
   'Type a friend\'s room code.',
   'Get a note when someone opens a public room.',
@@ -129,7 +130,7 @@ export class PvpLobbyScene extends Phaser.Scene {
     this.mode = 'menu';
     this.status.setText('Pick how to race').setColor('#ffd166');
     OPTIONS.forEach((label, i) => {
-      const t = this.add.text(GAME_WIDTH / 2, 62 + i * 16, label, { fontFamily: 'monospace', fontSize: '10px', color: '#ffffff' })
+      const t = this.add.text(GAME_WIDTH / 2, 60 + i * 14, label, { fontFamily: 'monospace', fontSize: '10px', color: '#ffffff' })
         .setOrigin(0.5).setInteractive({ useHandCursor: true })
         .on('pointerover', () => { this.sel = i; this.paintMenu(); })
         .on('pointerdown', () => { this.sel = i; this.confirm(); });
@@ -158,8 +159,9 @@ export class PvpLobbyScene extends Phaser.Scene {
       if (this.sel === 0) void this.quickMatch();
       else if (this.sel === 1) this.scene.start(SceneKey.PvpBrowse, { trackId: this.track.id });
       else if (this.sel === 2) this.scene.start(SceneKey.PvpOnline, { trackId: this.track.id });
-      else if (this.sel === 3) void this.createRoom(false);
-      else if (this.sel === 4) void this.joinWithCode();
+      else if (this.sel === 3) this.scene.start(SceneKey.PvpChat, { trackId: this.track.id });
+      else if (this.sel === 4) void this.createRoom(false);
+      else if (this.sel === 5) void this.joinWithCode();
       else { setLobbyAlerts(!lobbyAlertsOn()); this.paintMenu(); }
     } else if (this.mode === 'room') {
       this.startNow();
