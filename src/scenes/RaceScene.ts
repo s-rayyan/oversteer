@@ -255,7 +255,7 @@ export class RaceScene extends DriveScene {
     this.finish('FINISHED', lines);
     const run = { time: this.raceTime, carId: selectedCar().id, frames: this.rec };
     void this.submitOnline(Math.round(this.raceTime * 1000), async () => ((await uploadGhost(this.track.id, getName(), run)) ? 'Ghost uploaded' : undefined))
-      .then(() => (newLap ? submitScore(lapBoard(this.track.id), getName(), Math.round(bestThisRun * 1000)).catch(() => undefined) : undefined));
+      .then(() => (newLap ? submitScore(lapBoard(this.track.id), getName(), Math.round(bestThisRun * 1000), true).catch(() => undefined) : undefined));
   }
 
   protected lapNumber(): number {

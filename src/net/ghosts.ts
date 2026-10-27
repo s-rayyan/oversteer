@@ -43,7 +43,7 @@ export function decodeFrames(data: string): number[] | null {
 
 // Pressing R restarts the race and reloads the scene, which used to download the top replay again every time.
 // Keep it for a few minutes instead (each download is a read, and replays are the biggest documents we have).
-const TOP_TTL_MS = 5 * 60_000;
+const TOP_TTL_MS = 15 * 60_000;
 const topCache = new Map<string, { at: number; ghosts: OnlineGhost[] }>();
 /** Boards whose replay backfill has already been checked this session. */
 const synced = new Set<string>();

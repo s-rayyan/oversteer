@@ -35,6 +35,17 @@
         }
       }
     },
+    "lobbyBeacon": {
+      ".read": "auth != null",
+      ".write": "auth != null",
+      ".validate": "newData.hasChildren(['room', 'track', 'name', 'host', 'at']) && newData.child('host').val() === auth.uid",
+      "room": { ".validate": "newData.isString() && newData.val().length === 5" },
+      "track": { ".validate": "newData.isString() && newData.val().length <= 24" },
+      "name": { ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 12" },
+      "host": { ".validate": "newData.isString()" },
+      "at": { ".validate": "newData.isNumber()" },
+      "$other": { ".validate": false }
+    },
     "presence": {
       ".read": "auth != null",
       "$uid": {

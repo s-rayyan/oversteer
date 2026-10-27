@@ -14,7 +14,7 @@ import { firebaseConfigured, getFirebase, getRealtime, realtimeConfigured } from
 export const ROOM_MAX = 4;
 /** A driver who hasn't refreshed their lobby entry for this long is treated as gone. */
 export const PRESENCE_MS = 25_000;
-export const HEARTBEAT_MS = 8_000;
+export const HEARTBEAT_MS = 12_000;
 /** Public rooms older than this are no longer offered by quick match. */
 const ROOM_FRESH_MS = 4 * 60_000;
 /** Rooms are marked to expire this long after they open (see the TTL note in the README). */
@@ -130,7 +130,12 @@ const firestore: Backend = {
         });
         if (isPublic) {
           // One shared document that everyone online watches, so a waiting lobby can be offered to them (best effort).
-          void fs.setDoc(fs.doc(db, 'lobbyBeacon', 'latest'), { room: id, track, name: me.name, host: uid, at: fs.serverTimestamp() }).catch(() => undefined);
+          // In the Realtime Database when there is one (listeners there cost bandwidth, not a read per client per lobby).
+          if (realtimeConfigured) {
+            void getRealtime().then(({ rtdb, rt }) => rt.set(rt.ref(rtdb, 'lobbyBeacon'), { room: id, track, name: me.name, host: uid, at: rt.serverTimestamp() })).catch(() => undefined);
+          } else {
+            void fs.setDoc(fs.doc(db, 'lobbyBeacon', 'latest'), { room: id, track, name: me.name, host: uid, at: fs.serverTimestamp() }).catch(() => undefined);
+          }
         }
         return id;
       } catch (e) {
@@ -224,6 +229,17 @@ const firestore: Backend = {
   watchBeacon(cb) {
     let stop = false;
     let off: (() => void) | null = null;
+    if (realtimeConfigured) {
+      void getRealtime().then(({ rtdb, rt }) => {
+        if (stop) return;
+        off = rt.onValue(rt.ref(rtdb, 'lobbyBeacon'), (snap) => {
+          const d = snap.val() as { room?: string; track?: string; name?: string; host?: string; at?: number } | null;
+          if (!d || typeof d.room !== 'string') return;
+          cb({ room: d.room, track: String(d.track), name: String(d.name), host: String(d.host), at: typeof d.at === 'number' ? d.at : Date.now() });
+        }, () => undefined);
+      }).catch(() => undefined);
+      return () => { stop = true; off?.(); };
+    }
     void getFirebase().then(({ db, fs }) => {
       if (stop) return;
       off = fs.onSnapshot(fs.doc(db, 'lobbyBeacon', 'latest'), (snap) => {

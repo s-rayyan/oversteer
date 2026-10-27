@@ -204,16 +204,19 @@ export async function signOutAccount(): Promise<void> {
 export function initAccountSync(): void {
   if (!firebaseConfigured) return;
   let timer: number | undefined;
+  let dirty = false;
   onSaveChanged(() => {
+    dirty = true;
     if (!cachedAccount() || timer !== undefined) return; // a sync is already booked: it will pick this change up
     const wait = Math.max(DEBOUNCE_MS, lastSyncedAt() + MIN_INTERVAL_MS - Date.now());
     timer = window.setTimeout(() => {
       timer = undefined;
+      dirty = false;
       void syncCloud();
     }, wait);
   });
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'hidden' && cachedAccount()) void syncCloud();
+    if (document.visibilityState === 'hidden' && cachedAccount() && dirty) { dirty = false; void syncCloud(); } // nothing changed: nothing to write
   });
   window.addEventListener('online', () => void syncCloud());
   void syncCloud();

@@ -30,8 +30,16 @@ export interface SubmitResult {
 }
 
 /** Writes the player's score only if it beats their stored one (or the name changed); returns global rank. */
-export async function submitScore(board: string, name: string, value: number): Promise<SubmitResult> {
+export async function submitScore(board: string, name: string, value: number, quiet = false): Promise<SubmitResult> {
   const { db, uid, fs } = await getFirebase();
+  if (quiet) {
+    // Background catch-up: no read and no rank query. The rules refuse a score that is worse than the stored one,
+    // which the caller treats as "already covered".
+    await fs.setDoc(fs.doc(db, 'boards', board, 'scores', uid), { uid, name, value, updatedAt: fs.serverTimestamp() });
+    cache.delete(board);
+    markUploaded(board, value);
+    return { improved: true, best: value };
+  }
   const ref = fs.doc(db, 'boards', board, 'scores', uid);
   const snap = await fs.getDoc(ref);
   const old = snap.exists() ? (snap.data().value as number) : undefined;
@@ -59,14 +67,14 @@ const cache = new Map<string, { at: number; rows: ScoreRow[] }>();
 export async function fetchTop(board: string, n = 10): Promise<{ rows: ScoreRow[]; myUid: string }> {
   const { db, uid, fs } = await getFirebase();
   const hit = cache.get(board);
-  if (hit && Date.now() - hit.at < 60_000) return { rows: hit.rows, myUid: uid };
+  if (hit && Date.now() - hit.at < 5 * 60_000) return { rows: hit.rows, myUid: uid };
 
   // Fetch a few extra so the board still fills up after duplicates are dropped (each document read counts
-  // against the daily quota, so not too many).
+  // against the daily quota, so only a few).
   const q = fs.query(
     fs.collection(db, 'boards', board, 'scores'),
     fs.orderBy('value', higherIsBetter(board) ? 'desc' : 'asc'),
-    fs.limit(n * 2),
+    fs.limit(n + 3),
   );
   const snap = await fs.getDocs(q);
   const rows = dedupeByName(snap.docs.map((d) => d.data() as ScoreRow), uid).slice(0, n);
@@ -176,7 +184,7 @@ export async function syncLocalBests(): Promise<void> {
       .filter(([board, value]) => !((board === BOARD_ENDLESS || board === BOARD_OVERSTEER) && value < 30)); // same cut-off as EndlessScene
     for (const [board, value] of pending) {
       try {
-        await submitScore(board, name, value);
+        await submitScore(board, name, value, true);
       } catch (e) {
         // The rules turned this score down for good (e.g. faster than a believable time): stop retrying it on every
         // start, and carry on with the other boards. Anything else (offline...) stays queued for next time.
