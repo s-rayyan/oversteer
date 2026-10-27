@@ -48,15 +48,18 @@
     },
     "chat": {
       ".read": "auth != null",
-      ".indexOn": ["at"],
-      "$msg": {
-        ".write": "auth != null && !data.exists()",
-        ".validate": "newData.hasChildren(['u', 'n', 't', 'at']) && newData.child('u').val() === auth.uid",
-        "u": { ".validate": "newData.isString()" },
-        "n": { ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 12" },
-        "t": { ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 80" },
-        "at": { ".validate": "newData.val() === now" },
-        "$other": { ".validate": false }
+      "$room": {
+        ".indexOn": ["at"],
+        ".write": "auth != null && !newData.exists()",
+        "$msg": {
+          ".write": "auth != null && !data.exists()",
+          ".validate": "newData.hasChildren(['u', 'n', 't', 'at']) && newData.child('u').val() === auth.uid",
+          "u": { ".validate": "newData.isString()" },
+          "n": { ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 12" },
+          "t": { ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 80" },
+          "at": { ".validate": "newData.val() === now" },
+          "$other": { ".validate": false }
+        }
       }
     },
     "presence": {

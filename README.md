@@ -69,6 +69,11 @@ A challenge opens a private room and sends the other player a banner (ACCEPT / D
 so they need `VITE_FIREBASE_DATABASE_URL` and **`firebase deploy --only database`** to publish the new rules. Open
 matches is just a query on `rooms` and needs no new rules.
 
+**Room chat.** Inside a PvP waiting room there is a chat box (type, ENTER sends; with the box empty, ENTER still starts the
+race and ESC leaves). Messages live in the Realtime Database at `chat/{room}` (80 characters, one per 1.5 s), only that room's
+last 30 are loaded, and the host deletes the room's chat when the race starts or the room closes. Needs
+`firebase deploy --only database`.
+
 To try it without Firebase, open two tabs of a dev build at `/?pvp=local`: the same code runs over localStorage.
 
 ## Global leaderboard (Firebase)

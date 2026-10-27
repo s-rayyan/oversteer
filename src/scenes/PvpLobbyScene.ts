@@ -7,20 +7,21 @@ import { getName, setName } from '../game/player';
 import { selectedCar } from '../game/profile';
 import { DIFFICULTY_COLOR, TRACKS, type TrackDef } from '../game/tracks';
 import { lobbyAlertsOn, setLobbyAlerts } from '../game/lobbyAlert';
+import { CHAT_MAX, chatAvailable, clearChat, sendChat, watchChat, type ChatMessage } from '../net/chat';
 import { HEARTBEAT_MS, PvpError, ROOM_MAX, livePlayers, pvp, pvpAvailable, type Member, type Room } from '../net/pvp';
 
 const AUTO_START_MS = 8000; // after the second driver arrives, wait this long for more before a public room starts
 const FULL_START_MS = 2000;
 const HOP_CHECK_MS = 5000;
+const CHAT_LINES = 5;
 
 type Mode = 'menu' | 'busy' | 'room';
 
-const OPTIONS = ['QUICK MATCH', 'OPEN MATCHES', 'WHO IS ONLINE', 'CHAT', 'PRIVATE ROOM', 'JOIN WITH CODE', 'ALERTS'] as const;
+const OPTIONS = ['QUICK MATCH', 'OPEN MATCHES', 'WHO IS ONLINE', 'PRIVATE ROOM', 'JOIN WITH CODE', 'ALERTS'] as const;
 const OPTION_HINT = [
   'Race whoever is looking for this track.',
   'See every room waiting for drivers, on any track.',
   'See who is playing and challenge them.',
-  'Talk to everyone who is online.',
   'Make a room and share its code with friends.',
   'Type a friend\'s room code.',
   'Get a note when someone opens a public room.',
@@ -45,6 +46,10 @@ export class PvpLobbyScene extends Phaser.Scene {
   private starting = false;
   private leaving = false;
   private ui: Phaser.GameObjects.Text[] = [];
+  private chatMsgs: ChatMessage[] = [];
+  private chatLines: Phaser.GameObjects.Text[] = [];
+  private chatBox: HTMLInputElement | null = null;
+  private stopChat: (() => void) | null = null;
   private status!: Phaser.GameObjects.Text;
   private sub!: Phaser.GameObjects.Text;
   private hint!: Phaser.GameObjects.Text;
@@ -130,7 +135,7 @@ export class PvpLobbyScene extends Phaser.Scene {
     this.mode = 'menu';
     this.status.setText('Pick how to race').setColor('#ffd166');
     OPTIONS.forEach((label, i) => {
-      const t = this.add.text(GAME_WIDTH / 2, 60 + i * 14, label, { fontFamily: 'monospace', fontSize: '10px', color: '#ffffff' })
+      const t = this.add.text(GAME_WIDTH / 2, 62 + i * 16, label, { fontFamily: 'monospace', fontSize: '10px', color: '#ffffff' })
         .setOrigin(0.5).setInteractive({ useHandCursor: true })
         .on('pointerover', () => { this.sel = i; this.paintMenu(); })
         .on('pointerdown', () => { this.sel = i; this.confirm(); });
@@ -159,9 +164,8 @@ export class PvpLobbyScene extends Phaser.Scene {
       if (this.sel === 0) void this.quickMatch();
       else if (this.sel === 1) this.scene.start(SceneKey.PvpBrowse, { trackId: this.track.id });
       else if (this.sel === 2) this.scene.start(SceneKey.PvpOnline, { trackId: this.track.id });
-      else if (this.sel === 3) this.scene.start(SceneKey.PvpChat, { trackId: this.track.id });
-      else if (this.sel === 4) void this.createRoom(false);
-      else if (this.sel === 5) void this.joinWithCode();
+      else if (this.sel === 3) void this.createRoom(false);
+      else if (this.sel === 4) void this.joinWithCode();
       else { setLobbyAlerts(!lobbyAlertsOn()); this.paintMenu(); }
     } else if (this.mode === 'room') {
       this.startNow();
@@ -260,10 +264,57 @@ export class PvpLobbyScene extends Phaser.Scene {
     }
     this.ui.push(this.add.text(GAME_WIDTH / 2, 56, '', { fontFamily: 'monospace', fontSize: '8px', color: '#9ad1ff' }).setOrigin(0.5));
     this.hint.setText('ESC leave');
+    this.startChat(id);
     this.paintRoom();
   }
 
+  // ---- chat (messages go to this room only) ----
+
+  private startChat(id: string): void {
+    if (!chatAvailable()) return;
+    this.chatMsgs = [];
+    this.chatLines = Array.from({ length: CHAT_LINES }, (_, i) =>
+      this.add.text(20, 118 + i * 10, '', { fontFamily: 'monospace', fontSize: '8px', color: '#ffffff' }));
+    this.ui.push(...this.chatLines);
+    this.stopChat = watchChat(id, (m) => {
+      this.chatMsgs.push(m);
+      if (this.chatMsgs.length > CHAT_LINES) this.chatMsgs.shift();
+      this.chatLines.forEach((t, i) => {
+        const msg = this.chatMsgs[this.chatMsgs.length - CHAT_LINES + i];
+        if (t.scene) t.setText(msg ? `${msg.name.toUpperCase()}: ${msg.text}`.slice(0, 60) : '').setColor(msg?.uid === this.myUid ? '#ffd166' : '#c9d1e3');
+      });
+    });
+    const el = document.createElement('input');
+    el.maxLength = CHAT_MAX;
+    el.autocomplete = 'off';
+    el.spellcheck = false;
+    el.placeholder = getName() ? 'Chat with the room (ENTER sends)' : 'Pick a driver name to chat';
+    el.disabled = !getName();
+    el.style.cssText = 'position:fixed;left:50%;bottom:8px;transform:translateX(-50%);z-index:20;width:min(460px,calc(100vw - 24px));box-sizing:border-box;background:#14121f;border:2px solid #3d405b;color:#fff;font:14px monospace;padding:6px 9px;outline:none';
+    // Typing must not drive the game. With nothing typed, ENTER (start the race) and ESC (leave) go to the scene as usual.
+    el.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' || (e.key === 'Enter' && !el.value.trim())) return;
+      e.stopPropagation();
+      if (e.key === 'Enter') {
+        const text = el.value;
+        sendChat(id, text).then(() => { el.value = ''; }).catch(() => undefined);
+      }
+    });
+    el.addEventListener('keyup', (e) => { if (e.key !== 'Escape' && e.key !== 'Enter') e.stopPropagation(); });
+    document.body.append(el);
+    this.chatBox = el;
+  }
+
+  private endChat(): void {
+    this.stopChat?.();
+    this.stopChat = null;
+    this.chatBox?.remove();
+    this.chatBox = null;
+    this.chatLines = [];
+  }
+
   private stopRoom(): void {
+    this.endChat();
     this.unwatch?.();
     this.unwatch = null;
     this.timers.forEach((t) => t.remove());
@@ -274,6 +325,7 @@ export class PvpLobbyScene extends Phaser.Scene {
     const id = this.roomId;
     if (this.leaving || !id) return;
     this.leaving = true;
+    if (this.room?.host === this.myUid) void clearChat(id).catch(() => undefined);
     this.stopRoom();
     this.roomId = null;
     this.room = null;
@@ -293,6 +345,7 @@ export class PvpLobbyScene extends Phaser.Scene {
     this.room = r;
     if (r.status === 'racing') {
       this.starting = true;
+      if (r.host === this.myUid) void clearChat(r.id).catch(() => undefined);
       this.stopRoom();
       const roster = Object.fromEntries(livePlayers(r));
       this.scene.start(SceneKey.Pvp, { trackId: r.track, roomId: r.id, roster, me: this.myUid });
