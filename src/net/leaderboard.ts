@@ -1,4 +1,4 @@
-import { formatTime, getLocalBests, getUploadQueue, markUploaded, queueUpload } from '../game/records';
+import { formatTime, getLocalBestLaps, getLocalBests, getUploadQueue, markUploaded, queueUpload } from '../game/records';
 import { getName } from '../game/player';
 import { LB_SYNCED_KEY } from '../game/saveMerge';
 import { firebaseConfigured, getFirebase } from './firebase';
@@ -146,6 +146,7 @@ async function migrateSynced(): Promise<void> {
   try { localStorage.removeItem(LB_SYNCED_KEY); } catch { /* storage unavailable */ }
 }
 
+const LAP_SEEDED_KEY = 'oversteer.lapBoardsSeeded';
 let syncing = false;
 let again = false;
 
@@ -166,6 +167,11 @@ export async function syncLocalBests(): Promise<void> {
   syncing = true;
   try {
     await migrateSynced();
+    // One-time: best laps set before the lap boards existed count too.
+    if (localStorage.getItem(LAP_SEEDED_KEY) === null) {
+      for (const { board, value } of getLocalBestLaps()) queueUpload(board, value);
+      localStorage.setItem(LAP_SEEDED_KEY, '1');
+    }
     const pending = Object.entries(getUploadQueue())
       .filter(([board, value]) => !((board === BOARD_ENDLESS || board === BOARD_OVERSTEER) && value < 30)); // same cut-off as EndlessScene
     for (const [board, value] of pending) {

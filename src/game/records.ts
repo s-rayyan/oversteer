@@ -116,6 +116,11 @@ export function markUploaded(board: string, value: number): void {
   writeQueue(q);
 }
 
+/** Every saved best lap as a lap-board entry (ms). */
+export function getLocalBestLaps(): { board: string; value: number }[] {
+  return Object.entries(load().tracks).filter(([, r]) => r.bestLap !== undefined).map(([id, r]) => ({ board: `lap:${id}`, value: Math.round((r.bestLap as number) * 1000) }));
+}
+
 /** Every local best as a leaderboard entry (race boards in ms, distance boards in metres). */
 export function getLocalBests(): { board: string; value: number }[] {
   const s = load();
