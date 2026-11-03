@@ -20,8 +20,8 @@ const CAM_MODES: CamMode[] = ['chase', 'far', 'hood', 'high'];
 const CAM_LABEL: Record<CamMode, string> = { chase: 'CHASE CAM', far: 'FAR CHASE CAM', hood: 'BONNET CAM', high: 'HIGH CAM' };
 /** Distance behind, height, look-ahead and look height of each follow camera (world units = 2D pixels). */
 const CAM_RIG: Record<Exclude<CamMode, 'hood'>, [number, number, number, number]> = {
-  chase: [30, 10, 16, 3],
-  far: [52, 21, 24, 2],
+  chase: [32, 16, 18, 2],
+  far: [56, 30, 26, 1],
   high: [55, 90, 14, 0],
 };
 const CAM_KEY = 'oversteer.cam3d';
