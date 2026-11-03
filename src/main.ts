@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { GAME_WIDTH, GAME_HEIGHT } from './game/config';
 import { addFpsMeter } from './game/fpsMeter';
+import './game/keyboardFix'; // each key press reaches a scene once (see the file)
 import { completeEmailLinkSignIn, initAccountSync } from './net/account';
 import { syncLocalBests } from './net/leaderboard';
 import { isEmbedded, moveToHome, onFirebaseHost, onOldAddress, receiveSave, showLauncher } from './game/saveTransfer';
@@ -12,6 +13,7 @@ import { initLobbyAlerts } from './game/lobbyAlert';
 import { GarageScene } from './scenes/GarageScene';
 import { LeaderboardScene } from './scenes/LeaderboardScene';
 import { MenuScene } from './scenes/MenuScene';
+import { ModeSelectScene } from './scenes/ModeSelectScene';
 import { EndlessScene } from './scenes/EndlessScene';
 import { OversteerScene } from './scenes/OversteerScene';
 import { PvpBrowseScene } from './scenes/PvpBrowseScene';
@@ -32,13 +34,16 @@ function start(): void {
     width: GAME_WIDTH,
     height: GAME_HEIGHT,
     backgroundColor: '#14121f',
+    // See-through, so the 3D game's canvas (src/three/stage.ts) can show beneath the HUD. The page behind it is the
+    // same colour as the background, so the 2D game looks exactly as before.
+    transparent: true,
     pixelArt: true,
     roundPixels: true,
     scale: {
       mode: Phaser.Scale.FIT,
       autoCenter: Phaser.Scale.CENTER_BOTH,
     },
-    scene: [BootScene, TitleScene, MenuScene, RaceScene, EndlessScene, OversteerScene, LeaderboardScene, GarageScene, TutorialScene, ChallengesScene, StyleScene, PvpLobbyScene, PvpBrowseScene, PvpOnlineScene, PvpScene],
+    scene: [BootScene, ModeSelectScene, TitleScene, MenuScene, RaceScene, EndlessScene, OversteerScene, LeaderboardScene, GarageScene, TutorialScene, ChallengesScene, StyleScene, PvpLobbyScene, PvpBrowseScene, PvpOnlineScene, PvpScene],
   });
 
   // Catch up any scores earned while offline, now and whenever the connection returns.

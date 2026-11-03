@@ -7,6 +7,7 @@ import { cachedAccount } from '../net/account';
 import { firebaseConfigured } from '../net/firebase';
 import { markTutorialSeen, tutorialSeen } from '../game/tutorial';
 import { paintRoad, paintStartLine, type RoadPt } from '../game/Track';
+import { is3D } from '../game/dimension';
 
 // Framed showcase panel (same style as the menu's track preview) with an oval the cars drift around.
 const PANEL = { x: 40, y: 46, w: 240, h: 80 };
@@ -29,12 +30,7 @@ export class TitleScene extends Phaser.Scene {
   private t = 0;
   private leaving = false;
 
-  private readonly entries: Array<[string, string]> = [
-    ['PLAY', SceneKey.Menu],
-    ['GARAGE', SceneKey.Garage],
-    ['LEADERBOARD', SceneKey.Leaderboard],
-    ['TUTORIAL', SceneKey.Tutorial],
-  ];
+  private entries: Array<[string, string]> = [];
 
   constructor() {
     super(SceneKey.Title);
@@ -46,9 +42,20 @@ export class TitleScene extends Phaser.Scene {
     this.leaving = false;
     this.cars = [];
     const mono = { fontFamily: 'monospace', color: '#ffffff' };
+    const three = is3D();
+    // The 3D game has no tutorial of its own: its last entry goes back to the 2D / 3D choice instead.
+    this.entries = [
+      ['PLAY', SceneKey.Menu],
+      ['GARAGE', SceneKey.Garage],
+      ['LEADERBOARD', SceneKey.Leaderboard],
+      three ? ['SWITCH TO 2D', SceneKey.ModeSelect] : ['TUTORIAL', SceneKey.Tutorial],
+    ];
 
-    this.add.text(GAME_WIDTH / 2, 18, 'OVERSTEER', { ...mono, fontSize: '24px', color: '#ffd166' }).setOrigin(0.5);
-    this.add.text(GAME_WIDTH / 2, 36, 'a pixel drifting game', { ...mono, fontSize: '8px', color: '#8d99ae' }).setOrigin(0.5);
+    this.add.text(GAME_WIDTH / 2, 18, three ? 'OVERSTEER 3D' : 'OVERSTEER', { ...mono, fontSize: '24px', color: '#ffd166' }).setOrigin(0.5);
+    this.add.text(GAME_WIDTH / 2, 36, three ? 'same cars, a whole new view' : 'a pixel drifting game', { ...mono, fontSize: '8px', color: '#8d99ae' }).setOrigin(0.5);
+    // Back to the 2D / 3D choice (TAB).
+    this.add.text(3, 3, '< 2D/3D [TAB]', { ...mono, fontSize: '7px', color: '#9ad1ff' })
+      .setInteractive({ useHandCursor: true }).on('pointerdown', () => this.switchGame());
 
     this.buildShowcase();
 
@@ -85,6 +92,7 @@ export class TitleScene extends Phaser.Scene {
     kb.on('keydown-W', () => move(-1));
     kb.on('keydown-S', () => move(1));
     kb.on('keydown-G', () => this.go(this.entries.findIndex(([, key]) => key === SceneKey.Garage)));
+    kb.on('keydown-TAB', (e: KeyboardEvent) => { e.preventDefault(); this.switchGame(); });
     kb.on('keydown-ENTER', () => this.go(this.sel));
     kb.on('keydown-SPACE', () => this.go(this.sel));
     this.events.once('shutdown', () => kb.removeAllListeners());
@@ -135,6 +143,13 @@ export class TitleScene extends Phaser.Scene {
     });
   }
 
+  private switchGame(): void {
+    if (this.leaving) return;
+    this.leaving = true;
+    this.cameras.main.fadeOut(200, 20, 18, 31);
+    this.cameras.main.once('camerafadeoutcomplete', () => this.scene.start(SceneKey.ModeSelect));
+  }
+
   private go(i: number): void {
     if (this.leaving || (signInRequired() && !cachedAccount())) return; // signing in with Google is required to play
     this.leaving = true;
@@ -142,7 +157,7 @@ export class TitleScene extends Phaser.Scene {
     this.cameras.main.fadeOut(200, 20, 18, 31);
     // First-time players (no name yet, tutorial never shown) are taken through the tutorial before the track list.
     let next: string = this.entries[i][1];
-    if (next === SceneKey.Menu && !tutorialSeen() && !getName()) next = SceneKey.Tutorial;
+    if (next === SceneKey.Menu && !is3D() && !tutorialSeen() && !getName()) next = SceneKey.Tutorial;
     if (next === SceneKey.Tutorial) markTutorialSeen();
     this.cameras.main.once('camerafadeoutcomplete', () => this.scene.start(next));
   }

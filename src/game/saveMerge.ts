@@ -18,6 +18,7 @@ export const LB_SYNCED_KEY = 'oversteer.lbSynced';
 export const DEVICE_ONLY_KEYS: readonly string[] = [
   'oversteer.accountLabel', 'oversteer.cloudSyncedAt', 'oversteer.renamePending', 'oversteer.lbPending',
   'oversteer.muted', 'oversteer.daily.v1', // sound switch and today's best distances on the daily road
+  'oversteer.dim', 'oversteer.cam3d', // last game picked (2D or 3D) and the 3D camera
 ];
 
 const PROFILE = 'oversteer.profile.v1';

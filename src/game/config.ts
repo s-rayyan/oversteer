@@ -4,9 +4,11 @@ export const GAME_HEIGHT = 180;
 
 export const SceneKey = {
   Boot: 'BootScene',
+  ModeSelect: 'ModeSelectScene',
   Title: 'TitleScene',
   Menu: 'MenuScene',
   Race: 'RaceScene',
+  Race3D: 'Race3DScene',
   Endless: 'EndlessScene',
   Oversteer: 'OversteerScene',
   Leaderboard: 'LeaderboardScene',

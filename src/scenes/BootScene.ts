@@ -145,6 +145,6 @@ export class BootScene extends Phaser.Scene {
     vig.refresh();
     g.destroy();
 
-    this.scene.start(SceneKey.Title);
+    this.scene.start(SceneKey.ModeSelect); // 2D or 3D first, then that game's title screen
   }
 }

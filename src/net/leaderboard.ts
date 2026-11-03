@@ -109,7 +109,9 @@ export async function renameEverywhere(name: string): Promise<void> {
   try { localStorage.setItem(RENAME_KEY, name); } catch { /* storage unavailable */ }
   try {
     const { db, uid, fs } = await getFirebase();
-    const boards = [...TRACKS.map((t) => t.id), ...TRACKS.map((t) => lapBoard(t.id)), BOARD_ENDLESS, BOARD_OVERSTEER];
+    // 3D boards (`3d:{track}`): only the ones this player has a record on, to keep the reads down.
+    const played3d = getLocalBests().map((b) => b.board).filter((b) => b.startsWith('3d:'));
+    const boards = [...TRACKS.map((t) => t.id), ...TRACKS.map((t) => lapBoard(t.id)), BOARD_ENDLESS, BOARD_OVERSTEER, ...played3d, ...played3d.map(lapBoard)];
     for (const board of boards) {
       const ref = fs.doc(db, 'boards', board, 'scores', uid);
       const snap = await fs.getDoc(ref);

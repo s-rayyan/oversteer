@@ -21,7 +21,7 @@ const COOLDOWN_MS = 60_000;
 const MENU_MS = 14_000;
 const RACE_MS = 9_000;
 const CHALLENGE_MS = 30_000;
-const RACING = new Set<string>([SceneKey.Race, SceneKey.Endless, SceneKey.Oversteer, SceneKey.Tutorial, SceneKey.Pvp]);
+const RACING = new Set<string>([SceneKey.Race, SceneKey.Race3D, SceneKey.Endless, SceneKey.Oversteer, SceneKey.Tutorial, SceneKey.Pvp]);
 
 export const lobbyAlertsOn = (): boolean => {
   try { return localStorage.getItem(KEY) !== 'off'; } catch { return true; }

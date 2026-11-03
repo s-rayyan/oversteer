@@ -36,6 +36,25 @@ Back restarts (and it rumbles when you drift, boost or crash).
 - Confetti and a banner for new records and new bests; the profile save gained `paints`, `smokes` and `done` lists, merged
   as unions (`saveMerge.ts`, tested by `npm run test:merge`).
 
+## 3D mode
+
+Opening the game first asks **2D or 3D** (LEFT/RIGHT, ENTER; the last pick is highlighted). The 3D game is a second
+game inside this one: every circuit, driven from a chase camera, with its own records, medals, ghosts and leaderboards.
+The cars, coins, upgrades, paint and garage are shared. **TAB** on the title screen goes back to the 2D / 3D choice.
+
+- In a 3D race, **C** cycles the camera (chase, far chase, bonnet, high), remembered on this device. Everything else
+  is the same as 2D: SPACE/Z boost, X handbrake, R restart, ENTER respawn, ESC pause, gamepad.
+- It *plays* exactly like 2D: `Race3DScene` extends `RaceScene`, so the car physics, laps, timing, coins, drift chains,
+  boost pads, ghosts and results are the same code. Only the picture differs: the 2D camera is switched off and
+  three.js draws the world (`src/three/`) on its own canvas beneath Phaser's, which is transparent (`main.ts`), so the
+  HUD and menus are still Phaser's. Tracks, scenery, sky and cars are all generated in code.
+- Separate boards: 3D records and boards use the track id with a `3d:` prefix (`boards/3d:sunset-oval`,
+  `boards/lap:3d:sunset-oval`, ghosts under `boards/3d:sunset-oval/ghosts`, local records under the same keys).
+  The rules give `3d:` boards the same minimum times as the 2D track, so **deploy `firestore.rules`** before the 3D
+  boards accept scores. PvP, Endless and OVERSTEER stay 2D.
+- three.js is downloaded only when the 3D game is picked (its own chunk), so the 2D game loads no faster or slower.
+  Low effects (**Q**, or automatic) drops the shadows and renders at half resolution.
+
 ## PvP races (online)
 
 Pick a circuit in the menu and press **V** (or click **PVP RACE**). **Quick match** drops you into a room for that track with

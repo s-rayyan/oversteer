@@ -200,7 +200,8 @@ function forgetBakedTrack(scene: Phaser.Scene): void {
   bakedTrack = null;
 }
 
-export function buildTrack(scene: Phaser.Scene, def: TrackDef): BuiltTrack {
+/** The road of a track as samples ~4 px apart with their surface flags, and the world area around it (nothing drawn). */
+export function trackLayout(def: TrackDef): BuiltTrack {
   const raw = sampleClosedSpline(def.points, 4, def.roadWidth);
   const flags = surfaceFlags(raw.length, def);
   const samples: RoadPt[] = raw.map((p, i) => ({ x: p.x, y: p.y, half: p.w / 2, ...flags[i] }));
@@ -210,6 +211,11 @@ export function buildTrack(scene: Phaser.Scene, def: TrackDef): BuiltTrack {
   const x0 = Math.min(...xs) - MARGIN;
   const y0 = Math.min(...ys) - MARGIN;
   const bounds = new Phaser.Geom.Rectangle(x0, y0, Math.max(...xs) + MARGIN - x0, Math.max(...ys) + MARGIN - y0);
+  return { samples, bounds };
+}
+
+export function buildTrack(scene: Phaser.Scene, def: TrackDef): BuiltTrack {
+  const { samples, bounds } = trackLayout(def);
 
   // Deterministic scatter so a track looks the same every run. The road's asphalt grain has its own stream, so
   // the scenery comes out the same whether the road is painted fresh or reused from the last run.

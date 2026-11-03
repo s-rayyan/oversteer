@@ -362,6 +362,11 @@ export abstract class DriveScene extends Phaser.Scene {
     return owed;
   }
 
+  /** True while the pause menu has the world frozen. */
+  protected get isPaused(): boolean {
+    return this.paused;
+  }
+
   protected get coinsPaid(): number {
     return this.paidCoins;
   }

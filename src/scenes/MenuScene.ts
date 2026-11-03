@@ -15,11 +15,14 @@ import { TRACK_CLASSES, classifyTrack, type TrackClassId } from '../game/trackCl
 import { DIFFICULTY_COLOR, GROUPS, TRACKS } from '../game/tracks';
 import { MEDAL_COLOR, MEDAL_NAME, medalFor, medalTimes } from '../game/medals';
 import { dailySeed, getDailyBest } from '../game/daily';
+import { is3D, recordId } from '../game/dimension';
+import { ensure3D } from '../three/load';
 
 const ENDLESS_TAB = GROUPS.length;
 const OVERSTEER_TAB = GROUPS.length + 1;
-const TAB_COUNT = GROUPS.length + 2;
-const TAB_W = GAME_WIDTH / TAB_COUNT;
+// The 3D game has the circuits only (no Endless or OVERSTEER tabs).
+const tabCount = () => (is3D() ? GROUPS.length : GROUPS.length + 2);
+const tabW = () => GAME_WIDTH / tabCount();
 const PREVIEW = { x: 184, y: 62, w: 120, h: 74 };
 
 const classCache = new Map<string, TrackClassId>();
@@ -44,6 +47,7 @@ export class MenuScene extends Phaser.Scene {
   private pips: Phaser.GameObjects.Text[] = [];
   private medalTag!: Phaser.GameObjects.Text;
   private medalLine!: Phaser.GameObjects.Text;
+  private loading3D = false;
 
   constructor() {
     super(SceneKey.Menu);
@@ -54,13 +58,14 @@ export class MenuScene extends Phaser.Scene {
   }
 
   create(): void {
-    this.tab = lastTab;
-    this.row = lastTrack;
+    this.tab = lastTab < tabCount() ? lastTab : 0;
+    this.row = this.tab === lastTab ? lastTrack : 0;
+    this.loading3D = false;
     this.rows = [];
     this.pips = [];
     const mono = { fontFamily: 'monospace', fontSize: '10px', color: '#ffffff' };
 
-    this.add.text(GAME_WIDTH / 2, 14, 'OVERSTEER', { ...mono, fontSize: '18px', color: '#ffd166' }).setOrigin(0.5);
+    this.add.text(GAME_WIDTH / 2, 14, is3D() ? 'OVERSTEER 3D' : 'OVERSTEER', { ...mono, fontSize: '18px', color: '#ffd166' }).setOrigin(0.5);
 
     this.driver = this.add.text(4, 4, '', { ...mono, fontSize: '8px', color: '#8d99ae' })
       .setInteractive({ useHandCursor: true }).on('pointerdown', () => void this.changeName());
@@ -73,10 +78,10 @@ export class MenuScene extends Phaser.Scene {
     this.add.text(GAME_WIDTH - 4, 4, 'LEADERBOARD [L]', { ...mono, fontSize: '8px', color: '#ffd166' })
       .setOrigin(1, 0).setInteractive({ useHandCursor: true }).on('pointerdown', () => this.openBoard());
 
-    this.tabBar = this.add.rectangle(0, 41, TAB_W, 2, 0xffd166).setOrigin(0, 0);
-    this.tabLabels = [...GROUPS.map((g) => g.short), 'ENDLESS', 'OVERSTEER'].map((label, i) =>
+    this.tabBar = this.add.rectangle(0, 41, tabW(), 2, 0xffd166).setOrigin(0, 0);
+    this.tabLabels = [...GROUPS.map((g) => g.short), 'ENDLESS', 'OVERSTEER'].slice(0, tabCount()).map((label, i) =>
       this.add
-        .text(TAB_W * i + TAB_W / 2, 33, label, { ...mono, fontSize: '8px' })
+        .text(tabW() * i + tabW() / 2, 33, label, { ...mono, fontSize: '8px' })
         .setOrigin(0.5)
         .setInteractive({ useHandCursor: true })
         .on('pointerdown', () => this.setTab(i)),
@@ -140,7 +145,7 @@ export class MenuScene extends Phaser.Scene {
   }
 
   private startPvp(): void {
-    if (this.tab >= ENDLESS_TAB) return;
+    if (this.tab >= ENDLESS_TAB || is3D()) return; // online races are 2D only
     lastTab = this.tab;
     lastTrack = this.row;
     this.scene.start(SceneKey.PvpLobby, { trackId: this.tracksInTab()[this.row].id });
@@ -166,17 +171,19 @@ export class MenuScene extends Phaser.Scene {
   }
 
   private openBoard(): void {
-    const id = this.tab === ENDLESS_TAB ? BOARD_ENDLESS : this.tab === OVERSTEER_TAB ? BOARD_OVERSTEER : this.tracksInTab()[this.row].id;
+    const id = this.tab === ENDLESS_TAB ? BOARD_ENDLESS : this.tab === OVERSTEER_TAB ? BOARD_OVERSTEER : recordId(this.tracksInTab()[this.row].id);
     this.scene.start(SceneKey.Leaderboard, { board: id });
   }
 
   private setTab(i: number): void {
-    this.tab = (i + TAB_COUNT) % TAB_COUNT;
+    if (this.loading3D) return;
+    this.tab = (i + tabCount()) % tabCount();
     this.row = 0;
     this.refresh();
   }
 
   private setRow(i: number): void {
+    if (this.loading3D) return;
     const n = this.tab >= ENDLESS_TAB ? 2 : Math.max(1, this.tracksInTab().length); // endless tabs: random road, daily road
     this.row = (i + n) % n;
     this.refresh();
@@ -188,6 +195,19 @@ export class MenuScene extends Phaser.Scene {
     if (this.tab >= ENDLESS_TAB) {
       const key = this.tab === OVERSTEER_TAB ? SceneKey.Oversteer : SceneKey.Endless;
       this.scene.start(key, this.row === 1 ? { seed: dailySeed(), daily: true } : {});
+    } else if (is3D()) {
+      // The 3D engine downloads the first time it's needed.
+      if (this.loading3D) return;
+      this.loading3D = true;
+      const trackId = this.tracksInTab()[this.row].id;
+      this.preview.clear();
+      this.previewText.setText('LOADING 3D...');
+      ensure3D(this.game)
+        .then(() => { if (this.scene.isActive()) this.scene.start(SceneKey.Race3D, { trackId }); })
+        .catch((e: Error) => {
+          this.loading3D = false;
+          if (this.scene.isActive()) this.previewText.setText(e.message.includes('3D') ? e.message.replace(' (', '\n(') : "Couldn't load 3D.\nCheck your connection\nand press ENTER.");
+        });
     } else {
       this.scene.start(SceneKey.Race, { trackId: this.tracksInTab()[this.row].id });
     }
@@ -195,7 +215,7 @@ export class MenuScene extends Phaser.Scene {
 
   private refresh(): void {
     this.tabLabels.forEach((t, i) => t.setColor(i === this.tab ? '#ffd166' : '#ffffff'));
-    this.tabBar.x = TAB_W * this.tab;
+    this.tabBar.x = tabW() * this.tab;
 
     const tracks = this.tracksInTab();
     this.blurb.setText(this.tab === ENDLESS_TAB ? 'A road that never stops.' : this.tab === OVERSTEER_TAB ? 'Auto throttle, auto boost.' : GROUPS[this.tab].blurb);
@@ -214,12 +234,12 @@ export class MenuScene extends Phaser.Scene {
       const on = i === this.row;
       r.name.setText((on ? '> ' : '  ') + t.name).setColor(on ? '#ffd166' : '#ffffff');
       r.diff.setText(t.difficulty.toUpperCase()).setColor(DIFFICULTY_COLOR[t.difficulty]);
-      const medal = medalFor(t.id, getRecord(t.id).best);
+      const medal = medalFor(t.id, getRecord(recordId(t.id)).best);
       this.pips[i].setText('o').setColor(MEDAL_COLOR[medal]).setAlpha(medal ? 1 : 0.5);
     });
 
     this.ghostChip.setText(`GHOST: ${GHOST_MODE_LABEL[getGhostMode()]}`).setVisible(this.tab < ENDLESS_TAB);
-    this.pvpChip.setVisible(this.tab < ENDLESS_TAB);
+    this.pvpChip.setVisible(this.tab < ENDLESS_TAB && !is3D());
     this.preview.clear();
     this.classInfo.setText('');
     this.typeTag.setText('');
@@ -278,7 +298,7 @@ export class MenuScene extends Phaser.Scene {
       this.classInfo.setText(tb.cheapCar === tb.car ? `BEST: ${carName(tb.car)}` : `BEST: ${carName(tb.car)}   $1K: ${carName(tb.cheapCar)}`);
     }
 
-    const rec = getRecord(t.id);
+    const rec = getRecord(recordId(t.id));
     this.info.setText(`${t.laps} LAPS   BEST ${rec.best !== undefined ? formatTime(rec.best) : '--:--.---'}`);
     const have = medalFor(t.id, rec.best);
     const mt = medalTimes(t.id);

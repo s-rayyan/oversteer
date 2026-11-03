@@ -11,7 +11,7 @@ import { selectedCar } from '../game/profile';
 import { surfaceFlags, type SurfaceFlags } from '../game/surfaces';
 import { formatClock, formatTime, getRecord, submitRace } from '../game/records';
 import type { Pt } from '../game/spline';
-import { buildTrack, type RoadPt } from '../game/Track';
+import { buildTrack, type BuiltTrack, type RoadPt } from '../game/Track';
 import { TRACKS, type TrackDef } from '../game/tracks';
 import { DriveScene, type Spawn } from './DriveScene';
 import { audio } from '../game/audio';
@@ -20,9 +20,9 @@ import { MEDAL_COLOR, MEDAL_NAME, MEDAL_PAY, medalFor, medalTimes } from '../gam
 
 const WINDOW = 40; // samples searched either side of the last known position
 
-const MINE_TINT = 0xbfe9ff;
-const TOP_TINT = 0xffd166;
-const PODIUM_TINTS = [0xffd166, 0xdfe6ee, 0xe0985a]; // gold, silver, bronze for TOP 3
+export const MINE_TINT = 0xbfe9ff;
+export const TOP_TINT = 0xffd166;
+export const PODIUM_TINTS = [0xffd166, 0xdfe6ee, 0xe0985a]; // gold, silver, bronze for TOP 3
 const shortName = (n: string) => n.slice(0, 8).toUpperCase();
 
 /** Circuit race: N laps, lap timing, personal bests. */
@@ -45,11 +45,11 @@ export class RaceScene extends DriveScene {
   private medalGoal: { name: string; color: string; time: number } | null = null;
 
   // Ghosts: your best run, and the fastest uploaded run; plus a recording of this one.
-  private mine: GhostRunner | null = null;
-  private top: GhostRunner | null = null;
+  protected mine: GhostRunner | null = null;
+  protected top: GhostRunner | null = null;
   private topInfo: OnlineGhost | null = null;
   /** TOP 3 mode: the 2nd and 3rd fastest replays (the fastest is `top`). */
-  private chasers: { info: OnlineGhost; runner: GhostRunner; delta: Phaser.GameObjects.Text }[] = [];
+  protected chasers: { info: OnlineGhost; runner: GhostRunner; delta: Phaser.GameObjects.Text }[] = [];
   private topStatus: 'loading' | 'ready' | 'none' | 'error' | 'offline' = 'loading';
   private ghostMode: GhostMode = 'mine';
   private runToken = 0; // lets a late network reply tell it belongs to a scene that has since restarted
@@ -66,8 +66,18 @@ export class RaceScene extends DriveScene {
     this.track = TRACKS.find((t) => t.id === data.trackId) ?? TRACKS[0];
   }
 
+  /** Record, ghost and leaderboard id of this track (the 3D game prefixes it, see dimension.ts). */
+  protected recId(): string {
+    return this.track.id;
+  }
+
+  /** Lays out the road and draws the world (the 3D race draws its own and only needs the layout). */
+  protected buildWorld(): BuiltTrack {
+    return buildTrack(this, this.track);
+  }
+
   protected setupWorld(): Spawn {
-    const built = buildTrack(this, this.track);
+    const built = this.buildWorld();
     this.samples = built.samples;
     this.flags = surfaceFlags(this.samples.length, this.track);
     const b = built.bounds;
@@ -83,7 +93,7 @@ export class RaceScene extends DriveScene {
     this.finishPayout = 0;
     this.finished = false;
     this.medalWon = 0;
-    const record = getRecord(this.track.id);
+    const record = getRecord(this.recId());
     this.bestLap = record.bestLap ?? Infinity;
     // The next medal up from your best time on this track (shown in the corner while you race).
     const have = medalFor(this.track.id, record.best);
@@ -92,7 +102,7 @@ export class RaceScene extends DriveScene {
 
     this.rec = [];
     this.nextRec = 0;
-    const board = this.track.id;
+    const board = this.recId();
     const token = ++this.runToken;
     const local = this.useGhosts ? loadGhost(board) : null;
     this.mine = local ? new GhostRunner(this, local, MINE_TINT) : null;
@@ -220,8 +230,8 @@ export class RaceScene extends DriveScene {
 
   protected finishRace(): void {
     const bestThisRun = Math.min(...this.lapTimes);
-    const oldMedal = medalFor(this.track.id, getRecord(this.track.id).best);
-    const r = submitRace(this.track.id, this.raceTime, bestThisRun);
+    const oldMedal = medalFor(this.track.id, getRecord(this.recId()).best);
+    const r = submitRace(this.recId(), this.raceTime, bestThisRun);
     const newLap = r.newLap;
     this.finished = true;
     this.medalWon = medalFor(this.track.id, this.raceTime);
@@ -249,13 +259,13 @@ export class RaceScene extends DriveScene {
       this.showFlash('NEW RECORD!', 4000, '#52b788');
       this.confetti(60);
     }
-    if (saveGhostIfBest(this.track.id, { time: this.raceTime, carId: selectedCar().id, frames: this.rec })) {
+    if (saveGhostIfBest(this.recId(), { time: this.raceTime, carId: selectedCar().id, frames: this.rec })) {
       lines.push('Ghost saved');
     }
     this.finish('FINISHED', lines);
     const run = { time: this.raceTime, carId: selectedCar().id, frames: this.rec };
-    void this.submitOnline(Math.round(this.raceTime * 1000), async () => ((await uploadGhost(this.track.id, getName(), run)) ? 'Ghost uploaded' : undefined))
-      .then(() => (newLap ? submitScore(lapBoard(this.track.id), getName(), Math.round(bestThisRun * 1000), true).catch(() => undefined) : undefined));
+    void this.submitOnline(Math.round(this.raceTime * 1000), async () => ((await uploadGhost(this.recId(), getName(), run)) ? 'Ghost uploaded' : undefined))
+      .then(() => (newLap ? submitScore(lapBoard(this.recId()), getName(), Math.round(bestThisRun * 1000), true).catch(() => undefined) : undefined));
   }
 
   protected lapNumber(): number {
@@ -309,7 +319,7 @@ export class RaceScene extends DriveScene {
   }
 
   protected board(): string {
-    return this.track.id;
+    return this.recId();
   }
 
   protected restart(): void {

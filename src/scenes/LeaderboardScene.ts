@@ -4,8 +4,12 @@ import { TRACKS } from '../game/tracks';
 import { firebaseConfigured } from '../net/firebase';
 import { getLocalBests } from '../game/records';
 import { BOARD_ENDLESS, BOARD_OVERSTEER, fetchTop, formatScore, lapBoard } from '../net/leaderboard';
+import { is3D, recordId } from '../game/dimension';
 
-const BOARDS = [...TRACKS.map((t) => ({ id: t.id, name: t.name })), { id: BOARD_ENDLESS, name: 'Endless' }, { id: BOARD_OVERSTEER, name: 'OVERSTEER' }];
+type Board = { id: string; name: string };
+const BOARDS_2D: Board[] = [...TRACKS.map((t) => ({ id: t.id, name: t.name })), { id: BOARD_ENDLESS, name: 'Endless' }, { id: BOARD_OVERSTEER, name: 'OVERSTEER' }];
+/** The 3D game's boards are its own: one per circuit, `3d:{track}` (and `lap:3d:{track}` for best laps). */
+const BOARDS_3D: Board[] = TRACKS.map((t) => ({ id: recordId(t.id, '3d'), name: t.name }));
 
 export class LeaderboardScene extends Phaser.Scene {
   private idx = 0;
@@ -15,6 +19,7 @@ export class LeaderboardScene extends Phaser.Scene {
   private title!: Phaser.GameObjects.Text;
   private rows: Phaser.GameObjects.Text[] = [];
   private status!: Phaser.GameObjects.Text;
+  private all: Board[] = BOARDS_2D;
 
   constructor() {
     super(SceneKey.Leaderboard);
@@ -23,12 +28,13 @@ export class LeaderboardScene extends Phaser.Scene {
   init(data: { board?: string }): void {
     const lap = !!data.board?.startsWith('lap:');
     this.lap = lap;
-    this.idx = Math.max(0, BOARDS.findIndex((b) => b.id === (lap ? data.board!.slice(4) : data.board)));
+    this.all = is3D() ? BOARDS_3D : BOARDS_2D;
+    this.idx = Math.max(0, this.all.findIndex((b) => b.id === (lap ? data.board!.slice(4) : data.board)));
   }
 
   create(): void {
     const mono = { fontFamily: 'monospace', fontSize: '8px', color: '#ffffff' };
-    this.add.text(GAME_WIDTH / 2, 12, 'GLOBAL LEADERBOARD', { ...mono, fontSize: '12px', color: '#ffd166' }).setOrigin(0.5);
+    this.add.text(GAME_WIDTH / 2, 12, is3D() ? '3D LEADERBOARD' : 'GLOBAL LEADERBOARD', { ...mono, fontSize: '12px', color: '#ffd166' }).setOrigin(0.5);
 
     this.title = this.add.text(GAME_WIDTH / 2, 30, '', { ...mono, fontSize: '10px' }).setOrigin(0.5);
     const arrow = (x: number, label: string, d: number) =>
@@ -65,8 +71,8 @@ export class LeaderboardScene extends Phaser.Scene {
     this.scene.start(SceneKey.Menu);
   }
 
-  private get boards(): typeof BOARDS {
-    return this.lap ? BOARDS.filter((b) => b.id !== BOARD_ENDLESS && b.id !== BOARD_OVERSTEER) : BOARDS;
+  private get boards(): Board[] {
+    return this.lap ? this.all.filter((b) => b.id !== BOARD_ENDLESS && b.id !== BOARD_OVERSTEER) : this.all;
   }
 
   private step(d: number): void {
