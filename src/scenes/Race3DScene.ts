@@ -7,9 +7,9 @@ import { getCar } from '../game/cars';
 import type { GhostRunner } from '../game/GhostRunner';
 import { equippedPaint, equippedSmoke, selectedCar } from '../game/profile';
 import { quality } from '../game/quality';
-import { trackLayout, type BuiltTrack } from '../game/Track';
+import { KERB, trackLayout, type BuiltTrack } from '../game/Track';
 import { buildCar, type CarModel } from '../three/carModel';
-import { Particles, SkidMarks, displayColor } from '../three/fx';
+import { Particles, SkidMarks, Weather, displayColor } from '../three/fx';
 import { getStage, type Stage3D } from '../three/stage';
 import { worldFor, type World3D } from '../three/world';
 import type { Spawn } from './DriveScene';
@@ -25,6 +25,7 @@ const CAM_RIG: Record<Exclude<CamMode, 'hood'>, [number, number, number, number]
   high: [55, 90, 14, 0],
 };
 const CAM_KEY = 'oversteer.cam3d';
+const WEATHER_COUNT = { snow: 1400, rain: 1100, dust: 260 } as const;
 
 const loadCam = (): CamMode => {
   try {
@@ -35,34 +36,48 @@ const loadCam = (): CamMode => {
   }
 };
 
+/** The track the opening camera sweep was last shown on: restarting the same track (R) skips it. */
+let introShown = '';
+const ease = (t: number) => t * t * (3 - 2 * t);
+
 /**
  * A circuit race in 3D. All of the racing is RaceScene's (and DriveScene's): the same car physics, laps, timing,
  * coins, drift chains, boost pads, ghosts, pause and results, so the 3D game plays exactly like the 2D one. Only
  * the picture changes: the 2D world camera is switched off and three.js draws the track and the car from behind,
- * under Phaser's HUD. Records, ghosts and leaderboards are the 3D game's own (`3d:` ids, see dimension.ts).
+ * under Phaser's HUD. The hills are scenery only: the car is drawn on them, but it is driven on the flat 2D map.
+ * Records, ghosts and leaderboards are the 3D game's own (`3d:` ids, see dimension.ts).
  */
 export class Race3DScene extends RaceScene {
   private stage!: Stage3D;
   private world!: World3D;
-  private readonly cam3 = new THREE.PerspectiveCamera(64, 16 / 9, 0.5, 6000);
+  private readonly cam3 = new THREE.PerspectiveCamera(64, 16 / 9, 1, 6000);
   private model!: CarModel;
   private ghosts = new Map<GhostRunner, CarModel>();
   private smoke3!: Particles;
   private flame3!: Particles;
   private skids3!: SkidMarks;
+  private weather: Weather | null = null;
   private blob!: THREE.Mesh;
   private camMode: CamMode = 'chase';
   private camYaw = 0;
   private fov = 64;
+  private fovKick = 0;
+  private onPadBefore = false;
   private readonly eye = new THREE.Vector3();
   private readonly camLook = new THREE.Vector3();
   private snapCam = true;
+  private intro = false;
+  private readonly introEye = new THREE.Vector3();
   private lastHeading = 0;
   private lastSpeed = 0;
   private steerVis = 0;
   private roll = 0;
   private pitch = 0;
+  private tiltRoll = 0;
+  private tiltPitch = 0;
+  private carY = 0;
   private rolled = 0;
+  private rumble3 = 0;
   private shakeLeft = 0;
   private shakePower = 0;
   private lastSkid: Array<{ x: number; z: number } | null> = [null, null];
@@ -70,6 +85,7 @@ export class Race3DScene extends RaceScene {
   private readonly tmp = new THREE.Vector3();
   private readonly buf = new THREE.Vector2();
   private readonly dustColor = displayColor(0xa78a5a);
+  private readonly gravelColor = displayColor(0xb59a6a);
   private readonly flameColors = [0xffd166, 0xf4a261, 0xe63946, 0xfff1b8].map(displayColor);
 
   constructor() {
@@ -102,8 +118,9 @@ export class Race3DScene extends RaceScene {
 
   private build3D(): void {
     const def = selectedCar();
-    this.model = buildCar(def, equippedPaint().color ?? def.color);
-    const g = this.world.runGroup;
+    const w = this.world;
+    this.model = buildCar(def, equippedPaint().color ?? def.color, { beams: w.night });
+    const g = w.runGroup;
     g.add(this.model.root);
 
     const shadowTex = new THREE.CanvasTexture((() => {
@@ -128,14 +145,30 @@ export class Race3DScene extends RaceScene {
     this.smoke3 = new Particles(260, false, 5, 1.8);
     this.flame3 = new Particles(140, true, 1, 4);
     this.skids3 = new SkidMarks();
-    g.add(this.skids3.mesh, this.smoke3.points, this.flame3.points);
+    g.add(this.skids3.mesh, this.smoke3.points, this.flame3.points, this.cam3);
     const tint = equippedSmoke().tint;
     this.smokeColors = (Array.isArray(tint) ? tint : [tint]).map(displayColor);
 
+    this.carY = w.groundY(this.car.x, this.car.y);
+    this.weather = null;
+    if (w.weather) {
+      const n = Math.round(WEATHER_COUNT[w.weather] / (quality.low ? 3 : 1));
+      this.weather = new Weather(w.weather, n, this.car.x, this.carY + 16, this.car.y);
+      g.add(this.weather.obj);
+    }
+
     this.camMode = loadCam();
     this.snapCam = true;
+    // The first time a track is raced, the camera opens high over the track during the countdown and sweeps down.
+    this.intro = introShown !== this.track.id;
+    introShown = this.track.id;
+    const f = Math.cos(this.car.facing), s = Math.sin(this.car.facing);
+    this.introEye.set(this.car.x - f * w.span * 0.32, this.carY + w.span * 0.4 + 60, this.car.y - s * w.span * 0.32);
     this.lastHeading = this.car.facing;
     this.lastSpeed = 0;
+    this.tiltRoll = this.tiltPitch = 0;
+    this.fovKick = 0;
+    this.onPadBefore = false;
     this.lastSkid = [null, null];
     this.ghosts = new Map();
     this.stage.show(true);
@@ -151,6 +184,8 @@ export class Race3DScene extends RaceScene {
     this.smoke3.dispose();
     this.flame3.dispose();
     this.skids3.dispose();
+    this.weather?.dispose();
+    this.weather = null;
     this.blob.geometry.dispose();
     const bm = this.blob.material as THREE.MeshBasicMaterial;
     bm.map?.dispose();
@@ -161,6 +196,7 @@ export class Race3DScene extends RaceScene {
   private cycleCamera(): void {
     this.camMode = CAM_MODES[(CAM_MODES.indexOf(this.camMode) + 1) % CAM_MODES.length];
     this.snapCam = true;
+    this.intro = false;
     try { localStorage.setItem(CAM_KEY, this.camMode); } catch { /* storage unavailable */ }
     this.showFlash(CAM_LABEL[this.camMode], 900, '#9ad1ff');
   }
@@ -191,27 +227,47 @@ export class Race3DScene extends RaceScene {
     const sin = Math.sin(h);
     const speed = car.speed;
     const m = this.model;
+    const w = this.world;
+    const k = (rate: number) => 1 - Math.exp(-rate * dt);
+
+    // The car sits on the hills: its height and tilt come from the ground under its four corners.
+    const gy = (fwd: number, side: number) => {
+      const p = car.point(fwd, side);
+      return w.groundY(p.x, p.y);
+    };
+    this.carY = w.groundY(car.x, car.y);
+    const pitchWant = Math.atan2(gy(m.length * 0.4, 0) - gy(-m.length * 0.4, 0), m.length * 0.8);
+    const rollWant = Math.atan2(gy(0, -m.width * 0.45) - gy(0, m.width * 0.45), m.width * 0.9);
+    const snap = dt === 0 || this.snapCam;
+    this.tiltPitch += (pitchWant - this.tiltPitch) * (snap ? 1 : k(14));
+    this.tiltRoll += (rollWant - this.tiltRoll) * (snap ? 1 : k(14));
 
     // body roll, pitch and steering, from what the physics did this frame
+    let kerb = false;
     if (dt > 0) {
       const dh = Phaser.Math.Angle.Wrap(h - this.lastHeading);
       const turning = speed > 5 ? Phaser.Math.Clamp(dh / (Math.max(0.1, ph.stats.turnRate) * dt), -1, 1) : 0;
-      const ease = (k: number) => 1 - Math.exp(-k * dt);
-      this.steerVis += (turning - this.steerVis) * ease(12);
+      this.steerVis += (turning - this.steerVis) * k(12);
       const lateral = ph.vx * -sin + ph.vy * cos;
-      this.roll += (Phaser.Math.Clamp((lateral / ph.stats.maxSpeed) * 0.3, -0.09, 0.09) - this.roll) * ease(8);
+      this.roll += (Phaser.Math.Clamp((lateral / ph.stats.maxSpeed) * 0.3, -0.09, 0.09) - this.roll) * k(8);
       const accel = (speed - this.lastSpeed) / dt;
-      this.pitch += (Phaser.Math.Clamp(accel * 0.00035, -0.05, 0.05) - this.pitch) * ease(6);
+      this.pitch += (Phaser.Math.Clamp(accel * 0.00035, -0.05, 0.05) - this.pitch) * k(6);
       this.rolled += (ph.vx * cos + ph.vy * sin) * dt;
+      // running over a kerb rattles the car and the camera
+      const sp = this.samples[this.idx];
+      const d = Math.hypot(car.x - sp.x, car.y - sp.y);
+      kerb = !car.offRoad && speed > 35 && d > sp.half - 1.5 && d < sp.half + KERB + 0.5;
     }
+    this.rumble3 = kerb ? Math.min(1, this.rumble3 + dt * 8) : Math.max(0, this.rumble3 - dt * 6);
     this.lastHeading = h;
     this.lastSpeed = speed;
-    m.root.position.set(car.x, 0, car.y);
-    m.root.rotation.y = -h;
-    const bump = car.offRoad && speed > 20 && dt > 0 ? (Math.random() - 0.5) * 0.35 : 0;
+    m.root.position.set(car.x, this.carY, car.y);
+    m.root.rotation.set(this.tiltRoll, -h, this.tiltPitch, 'YXZ');
+    let bump = car.offRoad && speed > 20 && dt > 0 ? (Math.random() - 0.5) * 0.35 : 0;
+    if (this.rumble3 > 0 && dt > 0) bump += Math.sin(this.time.now * 0.09) * 0.14 * this.rumble3;
     m.body.position.y = bump;
     m.body.rotation.set(this.roll, 0, this.pitch);
-    m.wheels.forEach((w) => { w.rotation.z = -this.rolled / m.radius; });
+    m.wheels.forEach((wh, i) => { wh.rotation.z = -this.rolled / m.radii[i]; });
     m.steer.forEach((s) => { s.rotation.y = -this.steerVis * 0.42; });
     m.root.updateMatrixWorld();
 
@@ -220,17 +276,17 @@ export class Race3DScene extends RaceScene {
     this.updateCamera3D(dt);
 
     // lights the car carries
-    const w = this.world;
     if (this.wasBoosting && dt > 0) {
       this.tmp.copy(m.exhaust).applyMatrix4(m.root.matrixWorld);
       w.flameLight.position.copy(this.tmp);
       w.flameLight.intensity = 3 + Math.random() * 2;
     } else w.flameLight.intensity = 0;
     if (w.headlight) {
-      w.headlight.position.set(car.x + cos * m.length * 0.5, 4, car.y + sin * m.length * 0.5);
-      w.headlight.target.position.set(car.x + cos * 70, 0, car.y + sin * 70);
+      w.headlight.position.set(car.x + cos * m.length * 0.5, this.carY + 4, car.y + sin * m.length * 0.5);
+      w.headlight.target.position.set(car.x + cos * 70, w.groundY(car.x + cos * 70, car.y + sin * 70), car.y + sin * 70);
     }
-    w.update(dt, car.x, car.y, quality.low);
+    w.update(dt, car.x, this.carY, car.y, quality.low);
+    this.weather?.update(dt, this.cam3.position.x, this.cam3.position.y, this.cam3.position.z);
 
     const r = this.stage.renderer;
     const scale = r.getDrawingBufferSize(this.buf).y / (2 * Math.tan(THREE.MathUtils.degToRad(this.cam3.fov) / 2));
@@ -245,40 +301,53 @@ export class Race3DScene extends RaceScene {
     for (const run of runners) {
       let gm = this.ghosts.get(run);
       if (!gm) {
-        gm = buildCar(getCar(run.data.carId), run.sprite.tintTopLeft, true);
+        gm = buildCar(getCar(run.data.carId), run.sprite.tintTopLeft, { ghost: true, beams: this.world.night });
         this.world.runGroup.add(gm.root);
         this.ghosts.set(run, gm);
       }
       gm.root.visible = run.sprite.visible;
-      gm.root.position.set(run.sprite.x, 0, run.sprite.y);
+      if (!gm.root.visible) continue;
+      const x = run.sprite.x, z = run.sprite.y;
+      const dx = x - gm.root.position.x, dz = z - gm.root.position.z;
+      gm.root.position.set(x, this.world.groundY(x, z), z);
       gm.root.rotation.y = -run.sprite.rotation;
+      const moved = Math.hypot(dx, dz);
+      if (moved < 30) gm.wheels.forEach((wh, i) => { wh.rotation.z -= moved / gm!.radii[i]; });
     }
   }
 
   private effects3D(dt: number): void {
     const car = this.car;
     const m = this.model;
+    const w = this.world;
     const speed = car.speed;
     const slip = this.surface.zone ? car.phys.rawSlip : car.slip;
     const sliding = !car.offRoad && slip > DRIFT_SLIP && speed > DRIFT_MIN_SPEED;
+    const gravel = !car.offRoad && this.surface.rough && speed > 25;
     const fx = !quality.low;
     const rear = -m.length * 0.32;
     for (let k = 0; k < 2; k++) {
       const side = (k === 0 ? -1 : 1) * m.width * 0.4;
       const p = car.point(rear, side);
+      const y = w.groundY(p.x, p.y);
       if (sliding) {
         const last = this.lastSkid[k];
-        if (last && Math.hypot(p.x - last.x, p.y - last.z) < 30) this.skids3.add(last.x, last.z, p.x, p.y, 1.4);
+        if (last && Math.hypot(p.x - last.x, p.y - last.z) < 30) this.skids3.add(last.x, last.z, p.x, p.y, 1.4, y);
         this.lastSkid[k] = { x: p.x, z: p.y };
         if (fx) {
           const c = this.smokeColors[Math.floor(Math.random() * this.smokeColors.length)];
-          this.smoke3.emit(p.x, 0.8, p.y, (Math.random() - 0.5) * 8, 2 + Math.random() * 3, (Math.random() - 0.5) * 8, 0.9 + Math.random() * 0.4, 2.5, 11 + slip * 10, c, 0.5);
+          this.smoke3.emit(p.x, y + 0.8, p.y, (Math.random() - 0.5) * 8, 2 + Math.random() * 3, (Math.random() - 0.5) * 8, 0.9 + Math.random() * 0.4, 2.5, 11 + slip * 10, c, 0.5);
         }
       } else this.lastSkid[k] = null;
+      // gravel sections throw up a spray of grit from the back wheels
+      if (gravel && fx && Math.random() < 0.7) {
+        this.smoke3.emit(p.x, y + 0.6, p.y, (Math.random() - 0.5) * 16 - car.phys.vx * 0.15, 5 + Math.random() * 6, (Math.random() - 0.5) * 16 - car.phys.vy * 0.15,
+          0.7, 2, 9, this.gravelColor, 0.55);
+      }
     }
     if (car.offRoad && speed > 25 && fx) {
       const p = car.point(-m.length * 0.5, 0);
-      this.smoke3.emit(p.x, 0.6, p.y, (Math.random() - 0.5) * 14, 4 + Math.random() * 4, (Math.random() - 0.5) * 14, 0.6, 2, 8, this.dustColor, 0.6);
+      this.smoke3.emit(p.x, w.groundY(p.x, p.y) + 0.6, p.y, (Math.random() - 0.5) * 14, 4 + Math.random() * 4, (Math.random() - 0.5) * 14, 0.6, 2, 8, this.dustColor, 0.6);
     }
     if (this.wasBoosting) {
       this.tmp.copy(m.exhaust).applyMatrix4(m.root.matrixWorld);
@@ -291,6 +360,13 @@ export class Race3DScene extends RaceScene {
           0.12 + Math.random() * 0.1, 2.8, 0.6, c, 0.95);
       }
     }
+    // A boost pad punches the camera forward (a kick of field of view).
+    const onPad = !car.offRoad && this.surface.pad && this.state === 'racing';
+    if (onPad && !this.onPadBefore) {
+      this.fovKick = 14;
+    }
+    this.onPadBefore = onPad;
+    this.fovKick *= Math.exp(-3.5 * dt);
     if (this.shakeLeft > 0) {
       this.shakeLeft -= dt;
       if (this.shakeLeft <= 0) this.shakePower = 0;
@@ -300,6 +376,7 @@ export class Race3DScene extends RaceScene {
   private updateCamera3D(dt: number): void {
     const car = this.car;
     const m = this.model;
+    const w = this.world;
     const h = car.facing;
     const speed = car.speed;
     let dx = Math.cos(h);
@@ -318,12 +395,14 @@ export class Race3DScene extends RaceScene {
 
     const st = car.stats;
     const frac = Phaser.Math.Clamp(speed / (st.maxSpeed * st.boostSpeed), 0, 1);
-    const fovWant = (this.camMode === 'high' ? 50 : 62) + (quality.low ? 0 : 16 * frac);
-    this.fov += (fovWant - this.fov) * k(3);
+    const fovWant = (this.camMode === 'high' ? 50 : 62) + (quality.low ? 0 : 16 * frac + this.fovKick);
+    this.fov += (fovWant - this.fov) * k(this.fovKick > 1 ? 9 : 3);
+    const base = this.carY;
 
     if (this.camMode === 'hood') {
-      this.eye.set(car.x + Math.cos(h) * m.length * 0.05, m.width * 0.62 + 1.2, car.y + Math.sin(h) * m.length * 0.05);
-      this.camLook.set(car.x + cy * 60, 2, car.y + sy * 60);
+      this.eye.set(car.x + Math.cos(h) * m.length * 0.05, base + m.width * 0.62 + 1.2, car.y + Math.sin(h) * m.length * 0.05);
+      const lx = car.x + cy * 60, lz = car.y + sy * 60;
+      this.camLook.set(lx, w.groundY(lx, lz) + 2, lz);
     } else {
       const [dist, height, ahead, lookH] = CAM_RIG[this.camMode];
       const back = dist + frac * 5;
@@ -333,22 +412,35 @@ export class Race3DScene extends RaceScene {
       const kp = this.snapCam || far ? 1 : 1 - Math.exp(-10 * dt);
       this.eye.x += (tx - this.eye.x) * kp;
       this.eye.z += (tz - this.eye.z) * kp;
-      this.eye.y += (height - this.eye.y) * kp;
-      this.camLook.set(car.x + cy * ahead, lookH, car.y + sy * ahead);
+      this.eye.y += (base + height - this.eye.y) * kp;
+      this.eye.y = Math.max(this.eye.y, w.groundY(this.eye.x, this.eye.z) + 3); // never inside a hill
+      this.camLook.set(car.x + cy * ahead, base + lookH, car.y + sy * ahead);
     }
     this.snapCam = false;
 
     const c = this.cam3;
     c.position.copy(this.eye);
+    let look = this.camLook;
+    if (this.intro) {
+      // Opening shot: high above the track, looking over it, then sweeping down behind the car before GO.
+      const t = this.state === 'countdown' ? 1 - Math.max(0, this.countdown) / this.countdownFrom : 1;
+      const e = ease(Phaser.Math.Clamp((t - 0.15) / 0.8, 0, 1));
+      if (e >= 1) this.intro = false;
+      c.position.lerpVectors(this.introEye, this.eye, e);
+      c.position.y = this.introEye.y + (this.eye.y - this.introEye.y) * Math.pow(e, 0.6);
+      this.tmp.set(w.center.x, 0, w.center.z).lerp(this.camLook, ease(e));
+      look = this.tmp;
+    }
     if (this.shakeLeft > 0 && this.shakePower > 0) {
       const a = this.shakePower * 140;
       c.position.x += (Math.random() - 0.5) * a;
       c.position.y += (Math.random() - 0.5) * a * 0.6;
       c.position.z += (Math.random() - 0.5) * a;
     }
+    if (this.rumble3 > 0) c.position.y += Math.sin(this.time.now * 0.11) * 0.22 * this.rumble3;
     c.fov = this.fov;
     c.aspect = this.stage.aspect;
     c.updateProjectionMatrix();
-    c.lookAt(this.camLook);
+    c.lookAt(look);
   }
 }

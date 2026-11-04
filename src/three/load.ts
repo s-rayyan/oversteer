@@ -1,5 +1,6 @@
 import type Phaser from 'phaser';
 import { SceneKey } from '../game/config';
+import type { Showcase } from './showcase';
 
 let loading: Promise<void> | null = null;
 
@@ -21,4 +22,26 @@ export function ensure3D(game: Phaser.Game): Promise<void> {
   })();
   loading.catch(() => { loading = null; }); // a failed download can be tried again
   return loading;
+}
+
+/**
+ * Gets a track's 3D world ready before its race starts: builds it and compiles its shaders (see prepare.ts). A
+ * failure here only costs a stutter later, so it never stops the race.
+ */
+export async function prepare3D(game: Phaser.Game, trackId: string): Promise<void> {
+  await ensure3D(game);
+  await new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0))); // let "LOADING TRACK" show first
+  try {
+    const { prepareTrack } = await import('./prepare');
+    await prepareTrack(game, trackId);
+  } catch (e) {
+    console.warn('[3d prepare]', e);
+  }
+}
+
+/** A 3D turntable for the garage and paint shop (see showcase.ts). */
+export async function showcase3D(game: Phaser.Game, rect: { x: number; y: number; w: number; h: number }): Promise<Showcase> {
+  await ensure3D(game);
+  const { Showcase } = await import('./showcase');
+  return new Showcase(game, rect);
 }

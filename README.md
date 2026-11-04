@@ -52,6 +52,14 @@ The cars, coins, upgrades, paint and garage are shared. **TAB** on the title scr
   `boards/lap:3d:sunset-oval`, ghosts under `boards/3d:sunset-oval/ghosts`, local records under the same keys).
   The rules give `3d:` boards the same minimum times as the 2D track, so **deploy `firestore.rules`** before the 3D
   boards accept scores. PvP, Endless and OVERSTEER stay 2D.
+- The 3D world adds things you can't see from above: gentle **hills** (scenery only: the race is still driven on the
+  flat map, so times stay comparable), red **chevron boards** on the outside of sharp bends and marker posts along the
+  edges, **weather** (snow on Alpine tracks, blowing dust in the desert, rain on Lakeside and Harbor Run), and an
+  opening camera sweep over the track during the countdown the first time you race it (R skips it). Boost pads kick
+  the camera, gravel throws up grit and kerbs rattle the car. Every car has its own 3D body, and night tracks light
+  the road ahead of you (and of ghosts). The garage and paint shop show the car on a 3D turntable.
+- A track's world is built and its shaders compiled while the menu shows LOADING TRACK (`src/three/prepare.ts`), so
+  the race doesn't stutter when it starts.
 - three.js is downloaded only when the 3D game is picked (its own chunk), so the 2D game loads no faster or slower.
   Low effects (**Q**, or automatic) drops the shadows and renders at half resolution.
 

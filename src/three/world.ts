@@ -45,6 +45,16 @@ const LOOK: Record<Theme, ThemeLook> = {
   },
 };
 
+/** Grass tracks that get rain: a greyer sky, nearer fog and a dimmer sun. */
+const RAIN_TRACKS = ['lakeside', 'harbor-run'];
+const RAIN_LOOK: Partial<ThemeLook> = {
+  skyTop: 0x56677a, skyLow: 0xa4b2bd, fog: 0x98a7b2, fogNear: 250, fogFar: 2300, hemiSky: 0xc4d2de, hemi: 1.7, sun: 1.1, sunColor: 0xdfe8f0,
+};
+export type WeatherKind = 'snow' | 'dust' | 'rain' | null;
+
+/** Height of the hills (world units) per theme. They are only scenery: the race itself is driven on the flat 2D map. */
+const HILLS: Record<Theme, number> = { grass: 24, desert: 16, snow: 38, night: 10 };
+
 const GRAVEL = 0x8a7550;
 const DRIFT_ZONE = 0x454a8c;
 
@@ -85,7 +95,7 @@ const hex = (n: number) => `#${n.toString(16).padStart(6, '0')}`;
 export class RoadGrid {
   private readonly cell = 48;
   private readonly cells = new Map<number, number[]>();
-  private readonly maxHalf: number;
+  readonly maxHalf: number;
 
   constructor(private readonly pts: RoadPt[]) {
     this.maxHalf = Math.max(...pts.map((p) => p.half));
@@ -99,6 +109,27 @@ export class RoadGrid {
 
   private key(cx: number, cy: number): number {
     return (cx + 2048) * 4096 + (cy + 2048);
+  }
+
+  /** The road sample nearest to (x, y) within `reach` of its centre, and how far away it is; null if none is. */
+  nearest(x: number, y: number, reach: number): { i: number; d: number } | null {
+    const r = Math.ceil(reach / this.cell);
+    const cx = Math.floor(x / this.cell);
+    const cy = Math.floor(y / this.cell);
+    let best = -1;
+    let bd = reach * reach;
+    for (let i = cx - r; i <= cx + r; i++) {
+      for (let j = cy - r; j <= cy + r; j++) {
+        const list = this.cells.get(this.key(i, j));
+        if (!list) continue;
+        for (const s of list) {
+          const p = this.pts[s];
+          const d = (p.x - x) ** 2 + (p.y - y) ** 2;
+          if (d < bd) { bd = d; best = s; }
+        }
+      }
+    }
+    return best < 0 ? null : { i: best, d: Math.sqrt(bd) };
   }
 
   /** True when (x, y) is closer than `margin` past the edge of any part of the road. */
@@ -163,6 +194,32 @@ class Builder {
     g.computeVertexNormals();
     return g;
   }
+}
+
+const smooth = (t: number) => t * t * (3 - 2 * t);
+
+/**
+ * Gentle hills: a few long, low waves in random directions (the same every time for a track), flattening out a
+ * little way past the track so the ground meets the flat land and mountains around it.
+ */
+function makeTerrain(def: TrackDef, box: { x0: number; x1: number; y0: number; y1: number }): (x: number, z: number) => number {
+  const r = rng(`${def.id}-hills`);
+  const waves = ([[1300, 0.6], [800, 0.3], [480, 0.1]] as const).map(([len, w]) => {
+    const a = r() * Math.PI * 2;
+    const k = (Math.PI * 2) / len;
+    return { kx: Math.cos(a) * k, kz: Math.sin(a) * k, ph: r() * Math.PI * 2, w };
+  });
+  const amp = HILLS[def.theme];
+  const inner = 300;
+  const outer = 800;
+  return (x, z) => {
+    const d = Math.hypot(Math.max(box.x0 - x, 0, x - box.x1), Math.max(box.y0 - z, 0, z - box.y1));
+    if (d >= outer) return 0;
+    const fade = d <= inner ? 1 : 1 - smooth((d - inner) / (outer - inner));
+    let h = 0;
+    for (const w of waves) h += w.w * Math.sin(w.kx * x + w.kz * z + w.ph);
+    return amp * h * fade;
+  };
 }
 
 // ---------- props (trees, rocks...) as instanced meshes ----------
@@ -272,12 +329,25 @@ export class World3D {
   /** Lights the car carries, kept in the world for good (adding or removing a light recompiles every material). */
   readonly flameLight = new THREE.PointLight(0xff8a3d, 0, 45, 0);
   readonly headlight: THREE.SpotLight | null;
+  readonly weather: WeatherKind;
+  /** Height of the hills at any point, and of the road at every sample (the road is level across its width). */
+  readonly terrain: (x: number, z: number) => number;
+  readonly roadH: number[];
+  private readonly fr: ReturnType<typeof frames>;
   private readonly padTextures: THREE.Texture[] = [];
+  private readonly reach: number;
+  /** Middle of the track and its size, for the camera's opening shot. */
+  readonly center = { x: 0, z: 0 };
+  readonly span: number;
 
   constructor(readonly def: TrackDef, readonly samples: RoadPt[]) {
-    this.look = LOOK[def.theme];
     this.night = def.theme === 'night';
+    const rain = RAIN_TRACKS.includes(def.id);
+    this.weather = rain ? 'rain' : def.theme === 'snow' ? 'snow' : def.theme === 'desert' ? 'dust' : null;
+    this.look = rain ? { ...LOOK[def.theme], ...RAIN_LOOK } : LOOK[def.theme];
     this.grid = new RoadGrid(samples);
+    this.fr = frames(samples);
+    this.reach = this.grid.maxHalf + KERB + 45;
     const L = this.look;
 
     // Sky: a vertical gradient behind everything, and fog in the same colour as the horizon.
@@ -311,18 +381,48 @@ export class World3D {
     const cy = (box.y0 + box.y1) / 2;
     const span = Math.max(box.x1 - box.x0, box.y1 - box.y0);
     const rand = rng(def.id);
+    this.center.x = cx;
+    this.center.z = cy;
+    this.span = span;
+    this.terrain = makeTerrain(def, box);
+    this.roadH = samples.map((p) => this.terrain(p.x, p.y));
 
-    this.buildGround(cx, cy, span);
+    this.buildGround(box, span);
     this.buildRoad();
     this.buildPads();
     this.buildStart();
+    this.buildCorners();
     this.buildProps(box, rand);
     this.buildHorizon(cx, cy, span, rand);
     if (this.night) this.buildLamps();
     this.scene.add(this.runGroup);
   }
 
-  private buildGround(cx: number, cy: number, span: number): void {
+  /**
+   * How high the ground is at (x, z), and how far (0 on the road .. 1 clear of it) it has blended from the road's
+   * height to the hills': next to the road the ground meets the kerbs, further out it follows the hills.
+   */
+  private blend(x: number, z: number): { y: number; k: number } {
+    const t = this.terrain(x, z);
+    const n = this.grid.nearest(x, z, this.reach);
+    if (!n) return { y: t, k: 1 };
+    const e0 = this.samples[n.i].half + KERB + 1;
+    const k = n.d <= e0 ? 0 : n.d >= e0 + 40 ? 1 : smooth((n.d - e0) / 40);
+    const r = this.roadH[n.i];
+    return { y: r + (t - r) * k, k };
+  }
+
+  /** Height of whatever you stand on at (x, z): the road where it is the road, the ground anywhere else. */
+  groundY(x: number, z: number): number {
+    return this.blend(x, z).y;
+  }
+
+  /** Slope of the hills along a 2D direction (rise per unit), for laying flat things on the road. */
+  private slope(x: number, z: number, dx: number, dz: number): number {
+    return (this.terrain(x + dx * 2, z + dz * 2) - this.terrain(x - dx * 2, z - dz * 2)) / 4;
+  }
+
+  private buildGround(box: { x0: number; x1: number; y0: number; y1: number }, span: number): void {
     const [base, light, dark] = this.look.ground;
     const tex = canvasTexture(32, 32, (ctx) => {
       ctx.fillStyle = hex(base);
@@ -333,24 +433,60 @@ export class World3D {
       [[8, 8], [24, 18], [14, 28], [29, 5], [2, 24]].forEach(([x, y]) => ctx.fillRect(x, y, 2, 1));
     });
     tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-    const size = span + 9000;
-    tex.repeat.set(size / 40, size / 40);
-    const ground = new THREE.Mesh(new THREE.PlaneGeometry(size, size), new THREE.MeshLambertMaterial({ map: tex }));
-    ground.rotation.x = -Math.PI / 2;
-    ground.position.set(cx, 0, cy);
-    ground.receiveShadow = true;
-    this.scene.add(ground);
+    const mat = new THREE.MeshLambertMaterial({ map: tex });
+
+    // The hilly part: a grid over the track and a margin round it, with the road's line pressed into it (a touch
+    // below the asphalt, so the road always shows).
+    const m = 900;
+    const x0 = box.x0 - m, x1 = box.x1 + m, z0 = box.y0 - m, z1 = box.y1 + m;
+    const cell = 20;
+    const sx = Math.ceil((x1 - x0) / cell), sz = Math.ceil((z1 - z0) / cell);
+    const geo = new THREE.PlaneGeometry(sx * cell, sz * cell, sx, sz);
+    geo.rotateX(-Math.PI / 2);
+    geo.translate(x0 + (sx * cell) / 2, 0, z0 + (sz * cell) / 2);
+    const pos = geo.attributes.position as THREE.BufferAttribute;
+    const uv = geo.attributes.uv as THREE.BufferAttribute;
+    for (let i = 0; i < pos.count; i++) {
+      const x = pos.getX(i), z = pos.getZ(i);
+      const b = this.blend(x, z);
+      pos.setY(i, b.y - 0.6 * (1 - b.k));
+      uv.setXY(i, x / 40, z / 40);
+    }
+    geo.computeVertexNormals();
+    const hills = new THREE.Mesh(geo, mat);
+    hills.receiveShadow = true;
+    this.scene.add(hills);
+
+    // Flat land beyond it, out to the horizon: four strips round the grid (the grid's edge is already flat).
+    const far = span + 9000;
+    const gx1 = x0 + sx * cell, gz1 = z0 + sz * cell;
+    const strips: Array<[number, number, number, number]> = [
+      [x0 - far, z0 - far, gx1 + far, z0], [x0 - far, gz1, gx1 + far, gz1 + far],
+      [x0 - far, z0, x0, gz1], [gx1, z0, gx1 + far, gz1],
+    ];
+    for (const [ax, az, bx, bz] of strips) {
+      const g = new THREE.PlaneGeometry(bx - ax, bz - az);
+      g.rotateX(-Math.PI / 2);
+      g.translate((ax + bx) / 2, 0, (az + bz) / 2);
+      const u = g.attributes.uv as THREE.BufferAttribute;
+      const p = g.attributes.position as THREE.BufferAttribute;
+      for (let i = 0; i < p.count; i++) u.setXY(i, p.getX(i) / 40, p.getZ(i) / 40);
+      const strip = new THREE.Mesh(g, mat);
+      strip.receiveShadow = true;
+      this.scene.add(strip);
+    }
   }
 
   private buildRoad(): void {
     const pts = this.samples;
     const n = pts.length;
-    const fr = frames(pts);
+    const fr = this.fr;
+    const H = this.roadH;
     const road = new Builder();
     const kerb = new Builder();
     const marks = new Builder();
     let dist = 0;
-    const edge = (i: number, off: number, h: number, u: number, v: number) => [pts[i].x + fr[i].nx * off, h, pts[i].y + fr[i].ny * off, u, v];
+    const edge = (i: number, off: number, h: number, u: number, v: number) => [pts[i].x + fr[i].nx * off, H[i] + h, pts[i].y + fr[i].ny * off, u, v];
     // A raised kerb only rises where it isn't lying on another stretch of road (tight hairpins fold their inside
     // kerb over the road, and a kerb poking up through the asphalt would look broken).
     const kerbH = (i: number, off: number) => (this.grid.near(pts[i].x + fr[i].nx * off, pts[i].y + fr[i].ny * off, -1) ? ROAD_Y - 0.05 : KERB_TOP);
@@ -375,7 +511,7 @@ export class World3D {
         const q = (in0: number[], in1: number[], out1: number[], out0: number[], c: number) =>
           (side > 0 ? kerb.quad(in0, in1, out1, out0, c) : kerb.quad(out0, out1, in1, in0, c));
         q(edge(i, ia, ROAD_Y, 0, 0), edge(j, ib, ROAD_Y, 0, 0), edge(j, ob, hb, 0, 0), edge(i, oa, ha, 0, 0), kc);
-        q(edge(i, oa, ha, 0, 0), edge(j, ob, hb, 0, 0), edge(j, ob + side * 1.2, 0.02, 0, 0), edge(i, oa + side * 1.2, 0.02, 0, 0), 0x2a2838);
+        q(edge(i, oa, ha, 0, 0), edge(j, ob, hb, 0, 0), edge(j, ob + side * 1.2, -0.5, 0, 0), edge(i, oa + side * 1.2, -0.5, 0, 0), 0x2a2838);
       }
       // dashed centre line (none on gravel)
       if (!a.rough && Math.floor(i / 4) % 2 === 0) {
@@ -412,7 +548,7 @@ export class World3D {
   private buildPads(): void {
     const pts = this.samples;
     const n = pts.length;
-    const fr = frames(pts);
+    const fr = this.fr;
     // A chevron with its point at the top of the picture, which is the far end (+v) of the strip: the way you drive.
     const tex = canvasTexture(32, 32, (ctx) => {
       ctx.fillStyle = '#1d1b2e';
@@ -437,7 +573,7 @@ export class World3D {
       const w = pts[i].half * 0.75;
       const y = ROAD_Y + 0.04;
       const v0 = i / 3.3, v1 = (i + 1) / 3.3;
-      const e = (k: number, off: number, u: number, v: number) => [pts[k].x + fr[k].nx * off, y, pts[k].y + fr[k].ny * off, u, v];
+      const e = (k: number, off: number, u: number, v: number) => [pts[k].x + fr[k].nx * off, this.roadH[k] + y, pts[k].y + fr[k].ny * off, u, v];
       b.quad(e(i, -w, 0, v0), e(j, -w, 0, v1), e(j, w, 1, v1), e(i, w, 1, v0), 0xffffff);
     }
     if (!found) return;
@@ -448,7 +584,7 @@ export class World3D {
   /** Checkered start line and a gantry over it. */
   private buildStart(): void {
     const p = this.samples[0];
-    const f = frames(this.samples)[0];
+    const f = this.fr[0];
     const half = p.half;
     const checker = canvasTexture(16, 2, (ctx) => {
       for (let c = 0; c < 16; c++) for (let r = 0; r < 2; r++) {
@@ -460,18 +596,23 @@ export class World3D {
     line.rotation.x = -Math.PI / 2;
     const yaw = -Math.atan2(f.ty, f.tx);
     const holder = new THREE.Group();
-    holder.position.set(p.x, ROAD_Y + 0.05, p.y);
+    holder.position.set(p.x, this.roadH[0], p.y);
     holder.rotation.y = yaw;
-    // the plane's width runs along local x, which must lie across the road (local z after the yaw)
+    // the plane's width runs along local x, which must lie across the road (local z after the yaw); it is tipped to
+    // the road's slope
     line.rotation.z = Math.PI / 2;
     line.receiveShadow = true;
-    holder.add(line);
+    const tilt = new THREE.Group();
+    tilt.position.y = ROAD_Y + 0.05;
+    tilt.rotation.z = Math.atan(this.slope(p.x, p.y, f.tx, f.ty));
+    tilt.add(line);
+    holder.add(tilt);
 
     const postMat = lambert(0x2b2d42);
     const span = half + KERB + 5;
     for (const side of [-1, 1]) {
-      const post = new THREE.Mesh(new THREE.BoxGeometry(2.4, 28, 2.4), postMat);
-      post.position.set(0, 14, side * span);
+      const post = new THREE.Mesh(new THREE.BoxGeometry(2.4, 34, 2.4), postMat);
+      post.position.set(0, 11, side * span);
       post.castShadow = true;
       holder.add(post);
     }
@@ -511,7 +652,10 @@ export class World3D {
       }));
       if (!ok) continue;
       const g = new THREE.Group();
-      g.position.set(p.x + f.nx * side * off + f.tx * 24, 0, p.y + f.ny * side * off + f.ty * 24);
+      const gx = p.x + f.nx * side * off + f.tx * 24, gz = p.y + f.ny * side * off + f.ty * 24;
+      const low = Math.min(...[[0, -1], [0, 1], [1, -1], [1, 1]].map(([d, a]) =>
+        this.groundY(gx + f.nx * side * d * depth + f.tx * a * len / 2, gz + f.ny * side * d * depth + f.ty * a * len / 2)));
+      g.position.set(gx, low, gz);
       g.rotation.y = -Math.atan2(f.ty, f.tx);
       const crowd = canvasTexture(64, 4, (ctx) => {
         const r = rng(`${this.def.id}-crowd`);
@@ -527,6 +671,9 @@ export class World3D {
       crowd.repeat.set(4, 1);
       const concrete = lambert(0x8d99ae);
       const people = new THREE.MeshLambertMaterial({ map: crowd });
+      const footing = new THREE.Mesh(new THREE.BoxGeometry(len, 12, depth), concrete);
+      footing.position.set(0, -6, side * depth / 2); // reaches down into the slope
+      g.add(footing);
       for (let k = 0; k < 4; k++) {
         const h = 3 + k * 3.2;
         const step = new THREE.Mesh(new THREE.BoxGeometry(len, h, depth / 4), concrete);
@@ -541,13 +688,106 @@ export class World3D {
       roof.castShadow = true;
       g.add(roof);
       for (const x of [-len / 2, len / 2]) {
-        const post = new THREE.Mesh(new THREE.BoxGeometry(1.5, 24, 1.5), lambert(0x2b2d42));
-        post.position.set(x, 12, side * depth);
+        const post = new THREE.Mesh(new THREE.BoxGeometry(1.5, 30, 1.5), lambert(0x2b2d42));
+        post.position.set(x, 9, side * depth);
         g.add(post);
       }
       this.scene.add(g);
       return;
     }
+  }
+
+  /**
+   * Red chevron boards on the outside of every sharp bend, pointing the way it turns (tighter bends get more of
+   * them), and white marker posts along both edges of the road. In 3D you can't see a corner coming the way you can
+   * from above; these show it, and the posts flicking past make the speed easier to feel.
+   */
+  private buildCorners(): void {
+    const pts = this.samples;
+    const fr = this.fr;
+    const n = pts.length;
+    const W = 10; // samples either side (40 px) over which the road's turn is measured
+    const ang = fr.map((f) => Math.atan2(f.ty, f.tx));
+    const wrap = (a: number) => Math.atan2(Math.sin(a), Math.cos(a));
+    const turn = ang.map((_, i) => wrap(ang[(i + W) % n] - ang[(i - W + n) % n]));
+    const sharp = (i: number) => Math.abs(turn[(i + n) % n]) > 0.75;
+
+    // runs of sharp road, starting where the road is straight so a bend isn't split across the start line
+    let start = 0;
+    while (start < n && sharp(start)) start++;
+    const boards: Record<'left' | 'right', THREE.Matrix4[]> = { left: [], right: [] };
+    const taken: Array<[number, number]> = [];
+    for (let k = 0; k < n; k++) {
+      const i = (start + k) % n;
+      if (!sharp(i) || sharp(i - 1)) continue;
+      let len = 0;
+      let sum = 0;
+      while (len < n && sharp(i + len)) { sum += turn[(i + len) % n]; len++; }
+      const dir = sum > 0 ? 'right' : 'left'; // a growing heading turns right (2D map y points down)
+      const outside = sum > 0 ? -1 : 1;
+      const count = Math.min(7, 2 + Math.floor(len / 7));
+      for (let b = 0; b < count; b++) {
+        const j = (i - 6 + Math.round((b * (len + 6)) / Math.max(1, count - 1)) + n) % n;
+        const off = outside * (pts[j].half + KERB + 7);
+        const x = pts[j].x + fr[j].nx * off;
+        const z = pts[j].y + fr[j].ny * off;
+        if (this.grid.near(x, z, 2)) continue;
+        const from = fr[(j - 12 + n) % n]; // face the way drivers come at it
+        boards[dir].push(at(x, this.groundY(x, z) - 0.2, z, 0, Math.atan2(-from.tx, -from.ty), 0));
+        taken.push([x, z]);
+      }
+    }
+    const chevron = (dir: 'left' | 'right') => canvasTexture(48, 24, (ctx) => {
+      ctx.fillStyle = '#e63946';
+      ctx.fillRect(0, 0, 48, 24);
+      ctx.fillStyle = '#f1faee';
+      if (dir === 'left') { ctx.translate(48, 0); ctx.scale(-1, 1); }
+      for (const x0 of [6, 20, 34]) {
+        ctx.beginPath();
+        ctx.moveTo(x0, 3); ctx.lineTo(x0 + 6, 3); ctx.lineTo(x0 + 13, 12); ctx.lineTo(x0 + 6, 21); ctx.lineTo(x0, 21); ctx.lineTo(x0 + 7, 12);
+        ctx.closePath();
+        ctx.fill();
+      }
+    });
+    const back = lambert(0x2b2d42);
+    const postGeo = new THREE.BoxGeometry(0.6, 7, 0.6);
+    postGeo.translate(0, 3.5, 0);
+    const boardGeo = new THREE.BoxGeometry(9, 4.5, 0.4);
+    for (const dir of ['left', 'right'] as const) {
+      const tex = chevron(dir);
+      const face = new THREE.MeshLambertMaterial({ map: tex, emissive: 0xffffff, emissiveMap: tex, emissiveIntensity: this.night ? 0.55 : 0.12 });
+      // BoxGeometry faces: +x, -x, +y, -y, +z (the front, facing the driver), -z
+      const mats = [back, back, back, back, face, back];
+      instanced([
+        { geo: postGeo, mat: back, local: at(-3.2, 0, 0) },
+        { geo: postGeo, mat: back, local: at(3.2, 0, 0) },
+      ], boards[dir], true).forEach((m) => this.scene.add(m));
+      const mesh = new THREE.InstancedMesh(boardGeo, mats, boards[dir].length);
+      boards[dir].forEach((pl, i) => mesh.setMatrixAt(i, new THREE.Matrix4().multiplyMatrices(pl, at(0, 7.2, 0))));
+      mesh.castShadow = true;
+      mesh.computeBoundingSphere();
+      if (boards[dir].length) this.scene.add(mesh);
+    }
+
+    // marker posts, every 72 px along both edges
+    const posts: THREE.Matrix4[] = [];
+    for (let i = 0; i < n; i += 18) {
+      for (const side of [-1, 1]) {
+        const off = side * (pts[i].half + KERB + 3.5);
+        const x = pts[i].x + fr[i].nx * off;
+        const z = pts[i].y + fr[i].ny * off;
+        if (this.grid.near(x, z, 2) || taken.some(([tx, tz]) => (tx - x) ** 2 + (tz - z) ** 2 < 64)) continue;
+        posts.push(at(x, this.groundY(x, z) - 0.2, z, 0, Math.atan2(-fr[i].tx, -fr[i].ty), 0));
+      }
+    }
+    const stick = new THREE.BoxGeometry(0.8, 3.6, 0.8);
+    stick.translate(0, 1.8, 0);
+    const cap = new THREE.BoxGeometry(0.85, 0.7, 0.85);
+    cap.translate(0, 3, 0);
+    instanced([
+      { geo: stick, mat: lambert(0xf1faee), local: new THREE.Matrix4() },
+      { geo: cap, mat: new THREE.MeshBasicMaterial({ color: 0xff7b00 }), local: new THREE.Matrix4() },
+    ], posts, false).forEach((m) => this.scene.add(m));
   }
 
   private buildProps(box: { x0: number; x1: number; y0: number; y1: number }, rand: () => number): void {
@@ -566,7 +806,7 @@ export class World3D {
       while (k < kinds.length - 1 && (r -= kinds[k].weight) > 0) k++;
       const s = 0.75 + rand() * 0.6;
       if (this.grid.near(x, y, KERB + 8 + kinds[k].radius * s)) continue;
-      placed[k].push(at(x, 0, y, 0, rand() * Math.PI * 2, 0, s));
+      placed[k].push(at(x, this.groundY(x, y) - 0.3, y, 0, rand() * Math.PI * 2, 0, s));
     }
     kinds.forEach((kind, i) => instanced(kind.parts, placed[i], true).forEach((m) => this.scene.add(m)));
   }
@@ -634,9 +874,11 @@ export class World3D {
   /** Night tracks: street lamps along the road, each throwing a pool of warm light. */
   private buildLamps(): void {
     const pts = this.samples;
-    const fr = frames(pts);
+    const fr = this.fr;
     const posts: THREE.Matrix4[] = [];
     const pools: THREE.Matrix4[] = [];
+    const up = new THREE.Vector3(0, 1, 0);
+    const n = new THREE.Vector3();
     let side = 1;
     for (let i = 0; i < pts.length; i += 30) {
       side = -side;
@@ -645,10 +887,14 @@ export class World3D {
       const y = pts[i].y + fr[i].ny * off;
       if (this.grid.near(x, y, 2)) continue;
       // the arm points back over the road
-      posts.push(at(x, 0, y, 0, -Math.atan2(-fr[i].ny * side, -fr[i].nx * side), 0));
+      posts.push(at(x, this.groundY(x, y) - 0.3, y, 0, -Math.atan2(-fr[i].ny * side, -fr[i].nx * side), 0));
       const px = pts[i].x + fr[i].nx * (off - side * 9);
       const py = pts[i].y + fr[i].ny * (off - side * 9);
-      pools.push(at(px, ROAD_Y + 0.08, py, -Math.PI / 2, 0, 0, 30));
+      // the pool lies on the road, tipped to its slope
+      const g = this.slope(px, py, fr[i].tx, fr[i].ty);
+      n.set(-g * fr[i].tx, 1, -g * fr[i].ty).normalize();
+      const q = new THREE.Quaternion().setFromUnitVectors(up, n).multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(-Math.PI / 2, 0, 0)));
+      pools.push(new THREE.Matrix4().compose(new THREE.Vector3(px, this.groundY(px, py) + ROAD_Y + 0.1, py), q, new THREE.Vector3(30, 30, 30)));
     }
     const pole = new THREE.BoxGeometry(1.2, 24, 1.2);
     pole.translate(0, 12, 0);
@@ -674,11 +920,11 @@ export class World3D {
   }
 
   /** Per-frame: scroll the pad chevrons, keep the sun's shadow around the car, follow the effects setting. */
-  update(dt: number, carX: number, carY: number, lowFx: boolean): void {
+  update(dt: number, x: number, y: number, z: number, lowFx: boolean): void {
     for (const t of this.padTextures) t.offset.y = (t.offset.y - dt * 1.6) % 1;
     this.sun.castShadow = !lowFx;
-    this.sun.position.set(carX - 90, 170, carY - 60);
-    this.sun.target.position.set(carX, 0, carY);
+    this.sun.position.set(x - 90, y + 170, z - 60);
+    this.sun.target.position.set(x, y, z);
   }
 
   dispose(): void {

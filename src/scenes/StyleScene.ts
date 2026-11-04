@@ -1,8 +1,12 @@
 import Phaser from 'phaser';
+import { is3D } from '../game/dimension';
+import type { CarDef } from '../game/cars';
+import type { Showcase } from '../three/showcase';
+import { showcase3D } from '../three/load';
 import { bakeCar, paintedKey } from '../game/carTexture';
 import { PAINTS, SMOKES, type Paint, type SmokeStyle } from '../game/cosmetics';
 import { GAME_HEIGHT, GAME_WIDTH, SceneKey } from '../game/config';
-import { buyStyle, equippedStyle, getCoins, ownsStyle, selectedCar, type StyleKind } from '../game/profile';
+import { buyStyle, equippedStyle, getCoins, ownsStyle, selectedCar, type StyleKind, equippedPaint } from '../game/profile';
 import { CoinBadge } from '../game/ui';
 
 const COLS: Array<{ kind: StyleKind; title: string; x: number; items: ReadonlyArray<Paint | SmokeStyle> }> = [
@@ -20,6 +24,9 @@ export class StyleScene extends Phaser.Scene {
   private tags: Phaser.GameObjects.Text[][] = [[], []];
   private coins!: CoinBadge;
   private preview!: Phaser.GameObjects.Image;
+  /** The 3D game shows the car on a turntable instead of the 2D sprite. */
+  private show3d: Showcase | null = null;
+  private car3d: { def: CarDef; color: number } | null = null;
   private smokeGfx!: Phaser.GameObjects.Graphics;
   private toast!: Phaser.GameObjects.Text;
 
@@ -66,6 +73,16 @@ export class StyleScene extends Phaser.Scene {
     kb.on('keydown-ENTER', () => this.activate());
     kb.on('keydown-ESC', () => this.back());
     this.events.once('shutdown', () => kb.removeAllListeners());
+    this.show3d = null;
+    if (is3D()) {
+      this.preview.setVisible(false);
+      showcase3D(this.game, { x: 148, y: 25, w: 84, h: 34 }).then((sc) => {
+        if (!this.scene.isActive()) return sc.destroy();
+        this.show3d = sc;
+        if (this.car3d) sc.setCar(this.car3d.def, this.car3d.color);
+      }).catch(() => this.preview.setVisible(true));
+      this.events.once('shutdown', () => { this.show3d?.destroy(); this.show3d = null; });
+    }
     this.refresh();
   }
 
@@ -127,10 +144,16 @@ export class StyleScene extends Phaser.Scene {
       ? (paint.color === null ? `car-${car.id}` : bakeCar(this, car, paint.color, `car-${car.id}-${paint.id}`))
       : paintedKey(this, car);
     this.preview.setTexture(key);
+    this.car3d = { def: car, color: this.col === 0 ? (paint.color ?? car.color) : (equippedPaint().color ?? car.color) };
+    this.show3d?.setCar(this.car3d.def, this.car3d.color);
     const tints = Array.isArray(smoke.tint) ? smoke.tint : [smoke.tint];
     this.smokeGfx.clear();
     for (let i = 0; i < 6; i++) {
       this.smokeGfx.fillStyle(tints[i % tints.length], 0.85 - i * 0.12).fillCircle(this.preview.x - 40 - i * 9, 44 + (i % 2 ? 4 : -4), 3 + i * 0.8);
     }
+  }
+
+  update(_time: number, delta: number): void {
+    this.show3d?.update(delta);
   }
 }

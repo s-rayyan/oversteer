@@ -16,7 +16,7 @@ import { DIFFICULTY_COLOR, GROUPS, TRACKS } from '../game/tracks';
 import { MEDAL_COLOR, MEDAL_NAME, medalFor, medalTimes } from '../game/medals';
 import { dailySeed, getDailyBest } from '../game/daily';
 import { is3D, recordId } from '../game/dimension';
-import { ensure3D } from '../three/load';
+import { prepare3D } from '../three/load';
 
 const ENDLESS_TAB = GROUPS.length;
 const OVERSTEER_TAB = GROUPS.length + 1;
@@ -201,8 +201,8 @@ export class MenuScene extends Phaser.Scene {
       this.loading3D = true;
       const trackId = this.tracksInTab()[this.row].id;
       this.preview.clear();
-      this.previewText.setText('LOADING 3D...');
-      ensure3D(this.game)
+      this.previewText.setText('LOADING TRACK...');
+      prepare3D(this.game, trackId)
         .then(() => { if (this.scene.isActive()) this.scene.start(SceneKey.Race3D, { trackId }); })
         .catch((e: Error) => {
           this.loading3D = false;

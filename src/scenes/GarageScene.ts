@@ -1,9 +1,13 @@
 import Phaser from 'phaser';
+import { is3D } from '../game/dimension';
+import type { CarDef } from '../game/cars';
+import type { Showcase } from '../three/showcase';
+import { showcase3D } from '../three/load';
 import {
   CARS, CAR_CLASSES, MAX_LEVEL, UPGRADES, UPGRADE_KEYS, effectiveStats, noUpgrades, statBars, type UpgradeKey,
 } from '../game/cars';
 import { GAME_HEIGHT, GAME_WIDTH, SceneKey } from '../game/config';
-import { buyCar, buyUpgrade, getCoins, getLevels, owns, selectCar, selectedCar, upgradeCost } from '../game/profile';
+import { buyCar, buyUpgrade, getCoins, getLevels, owns, selectCar, selectedCar, upgradeCost, equippedPaint } from '../game/profile';
 import { TRACK_BEST } from '../game/trackBest';
 import { TRACKS } from '../game/tracks';
 import { CoinBadge } from '../game/ui';
@@ -19,6 +23,9 @@ export class GarageScene extends Phaser.Scene {
   private rows: Array<{ name: Phaser.GameObjects.Text; tag: Phaser.GameObjects.Text }> = [];
   private coins!: CoinBadge;
   private preview!: Phaser.GameObjects.Image;
+  /** The 3D game shows the car on a turntable instead of the 2D sprite. */
+  private show3d: Showcase | null = null;
+  private car3d: { def: CarDef; color: number } | null = null;
   private title!: Phaser.GameObjects.Text;
   private blurb!: Phaser.GameObjects.Text;
   private classTag!: Phaser.GameObjects.Text;
@@ -95,6 +102,16 @@ export class GarageScene extends Phaser.Scene {
     kb.on('keydown-THREE', () => this.upgrade('turbo'));
     this.events.once('shutdown', () => kb.removeAllListeners());
 
+    this.show3d = null;
+    if (is3D()) {
+      this.preview.setVisible(false);
+      showcase3D(this.game, { x: 142, y: 20, w: 47, h: 38 }).then((sc) => {
+        if (!this.scene.isActive()) return sc.destroy();
+        this.show3d = sc;
+        if (this.car3d) sc.setCar(this.car3d.def, this.car3d.color);
+      }).catch(() => this.preview.setVisible(true));
+      this.events.once('shutdown', () => { this.show3d?.destroy(); this.show3d = null; });
+    }
     this.refresh();
   }
 
@@ -153,6 +170,8 @@ export class GarageScene extends Phaser.Scene {
     const car = CARS[this.sel];
     const lv = owns(car.id) ? getLevels(car.id) : noUpgrades();
     this.preview.setTexture(owns(car.id) ? paintedKey(this, car) : `car-${car.id}`); // owned cars show your paint job
+    this.car3d = { def: car, color: owns(car.id) ? (equippedPaint().color ?? car.color) : car.color };
+    this.show3d?.setCar(this.car3d.def, this.car3d.color);
     this.title.setText(car.name);
     this.blurb.setText(car.blurb);
     const cls = CAR_CLASSES[car.carClass];
@@ -195,5 +214,9 @@ export class GarageScene extends Phaser.Scene {
     if (car.id === equipped) this.action.setText('EQUIPPED').setColor('#52b788');
     else if (owns(car.id)) this.action.setText('ENTER: EQUIP').setColor('#ffffff');
     else this.action.setText(`ENTER: BUY $${car.price}`).setColor(getCoins() >= car.price ? '#ffd166' : '#e63946');
+  }
+
+  update(_time: number, delta: number): void {
+    this.show3d?.update(delta);
   }
 }
