@@ -11,7 +11,7 @@ import type { Pt } from '../game/spline';
 import { addCoins, challengeDone, completeChallenge, equippedSmoke, equippedStats, selectedCar } from '../game/profile';
 import { Overlay, type OverlayEntry } from '../game/ui';
 import { firebaseConfigured } from '../net/firebase';
-import { submitScore, formatScore, type SubmitResult } from '../net/leaderboard';
+import { submitScore, formatScore, is3DBoard, type SubmitResult } from '../net/leaderboard';
 import { HeatMeter } from '../game/HeatMeter';
 import { quality } from '../game/quality';
 import { audio } from '../game/audio';
@@ -494,7 +494,9 @@ export abstract class DriveScene extends Phaser.Scene {
       }
     } catch (e) {
       console.error('[leaderboard]', e);
-      line('Leaderboard unavailable');
+      // The 3D boards need the updated firestore.rules online; until then the time waits on this device.
+      const refused = (e as { code?: string }).code === 'permission-denied' && is3DBoard(this.board());
+      line(refused ? '3D board not live yet: time saved, uploads later' : 'Leaderboard unavailable');
     }
   }
 

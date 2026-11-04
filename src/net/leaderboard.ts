@@ -16,6 +16,9 @@ export interface ScoreRow {
 /** Best single lap on a track lives on its own board, `lap:{trackId}` (milliseconds, lower is better). */
 export const lapBoard = (trackId: string): string => `lap:${trackId}`;
 
+/** A 3D game board (`3d:{track}` or `lap:3d:{track}`). */
+export const is3DBoard = (board: string): boolean => board.startsWith('3d:') || board.startsWith('lap:3d:');
+
 /** Race boards store milliseconds (lower is better); endless stores metres (higher is better). */
 export const higherIsBetter = (board: string): boolean => board === BOARD_ENDLESS || board === BOARD_OVERSTEER;
 
@@ -157,6 +160,7 @@ async function migrateSynced(): Promise<void> {
 }
 
 const LAP_SEEDED_KEY = 'oversteer.lapBoardsSeeded';
+const SEEDED_3D_KEY = 'oversteer.3dBoardsSeeded';
 let syncing = false;
 let again = false;
 
@@ -182,6 +186,12 @@ export async function syncLocalBests(): Promise<void> {
       for (const { board, value } of getLocalBestLaps()) queueUpload(board, value);
       localStorage.setItem(LAP_SEEDED_KEY, '1');
     }
+    // One-time: 3D times set while the online rules didn't know the 3D boards yet were refused and dropped. Queue
+    // them again (3D boards now stay queued until accepted, see below).
+    if (localStorage.getItem(SEEDED_3D_KEY) === null) {
+      for (const { board, value } of [...getLocalBests(), ...getLocalBestLaps()]) if (is3DBoard(board)) queueUpload(board, value);
+      localStorage.setItem(SEEDED_3D_KEY, '1');
+    }
     const pending = Object.entries(getUploadQueue())
       .filter(([board, value]) => !((board === BOARD_ENDLESS || board === BOARD_OVERSTEER) && value < 30)); // same cut-off as EndlessScene
     for (const [board, value] of pending) {
@@ -190,8 +200,11 @@ export async function syncLocalBests(): Promise<void> {
       } catch (e) {
         // The rules turned this score down for good (e.g. faster than a believable time): stop retrying it on every
         // start, and carry on with the other boards. Anything else (offline...) stays queued for next time.
-        if ((e as { code?: string }).code === 'permission-denied') markUploaded(board, value);
-        else throw e;
+        // A refused 3D score most likely means the rules that add the 3D boards aren't published yet: keep it queued
+        // so it goes up once they are (one small write a visit until then).
+        const denied = (e as { code?: string }).code === 'permission-denied';
+        if (denied && !is3DBoard(board)) markUploaded(board, value);
+        else if (!denied) throw e;
       }
     }
   } catch {
